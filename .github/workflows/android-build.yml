@@ -1,4 +1,4 @@
-name: Build APK
+name: Build FFmpegMediaPlayer APK
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
     - name: Checkout repo
       uses: actions/checkout@v3
 
-    - name: Setup Java
+    - name: Setup Java 11
       uses: actions/setup-java@v3
       with:
         distribution: 'temurin'
@@ -34,11 +34,23 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x ./gradlew
 
-    - name: Build APK (Release)
-      run: ./gradlew clean assembleRelease
+    - name: Clean build
+      run: ./gradlew clean
 
-    - name: Upload APK
+    - name: Build Release APK
+      run: ./gradlew :fmp-demo:assembleRelease
+
+    - name: Upload Release APK
       uses: actions/upload-artifact@v3
       with:
         name: FMPDemo-release.apk
         path: fmp-demo/build/outputs/apk/release/fmp-demo-release.apk
+
+    - name: Build Debug APK
+      run: ./gradlew :fmp-demo:assembleDebug
+
+    - name: Upload Debug APK
+      uses: actions/upload-artifact@v3
+      with:
+        name: FMPDemo-debug.apk
+        path: fmp-demo/build/outputs/apk/debug/fmp-demo-debug.apk
