@@ -30,6 +30,12 @@ jobs:
     - name: Make gradlew executable
       run: chmod +x ./gradlew
 
+    - name: Generate local.properties
+      run: |
+        echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+        echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
+    
+
     - name: Clean project
       run: ./gradlew clean
 
