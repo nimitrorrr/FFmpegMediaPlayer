@@ -3,46 +3,52 @@ package wseemann.media.fmpdemo.helper;
 import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
-import android.provider.DocumentsContract;
+import android.provider.OpenableColumns;
 
 import androidx.documentfile.provider.DocumentFile;
 
-import java.util.ArrayList;
-import java.util.List;
-
 public class FileExplorerHelper {
 
-    public static final int REQUEST_CODE_OPEN_DIRECTORY = 1;
+    public static final int REQUEST_CODE_OPEN_FILE = 1;
 
-    public static void openDirectoryPicker(Activity activity) {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        intent.addCategory(Intent.CATEGORY_DEFAULT);
-        activity.startActivityForResult(intent, REQUEST_CODE_OPEN_DIRECTORY);
+    public static void openFilePicker(Activity activity) {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        
+        // Устанавливаем фильтр для видео и аудио файлов
+        String[] mimeTypes = {
+            "video/*",
+            "audio/*",
+            "application/ogg",
+            "application/x-extension-mp4"
+        };
+        
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes);
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false);
+        
+        activity.startActivityForResult(intent, REQUEST_CODE_OPEN_FILE);
     }
 
-    public static List<DocumentFile> listFiles(Activity activity, Uri treeUri) {
-        List<DocumentFile> files = new ArrayList<>();
-        DocumentFile directory = DocumentFile.fromTreeUri(activity, treeUri);
-        
-        if (directory != null && directory.exists()) {
-            for (DocumentFile file : directory.listFiles()) {
-                if (file.isFile() && isMediaFile(file.getName())) {
-                    files.add(file);
+    public static String getFileName(Activity activity, Uri uri) {
+        String result = null;
+        if (uri.getScheme().equals("content")) {
+            try (var cursor = activity.getContentResolver().query(uri, null, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    int index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    if (index != -1) {
+                        result = cursor.getString(index);
+                    }
                 }
             }
         }
-        return files;
-    }
-
-    private static boolean isMediaFile(String fileName) {
-        if (fileName == null) return false;
-        
-        String[] mediaExtensions = {".mp3", ".mp4", ".avi", ".mkv", ".flac", ".wav", ".aac", ".mov"};
-        for (String ext : mediaExtensions) {
-            if (fileName.toLowerCase().endsWith(ext)) {
-                return true;
+        if (result == null) {
+            result = uri.getPath();
+            int cut = result.lastIndexOf('/');
+            if (cut != -1) {
+                result = result.substring(cut + 1);
             }
         }
-        return false;
+        return result;
     }
 }
