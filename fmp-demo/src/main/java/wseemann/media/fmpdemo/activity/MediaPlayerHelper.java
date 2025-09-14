@@ -17,7 +17,11 @@ public class MediaPlayerHelper implements
 
     public void setSurface(Surface surface) {
         mSurface = surface;
-        tryToPrepare();
+        try {
+            tryToPrepare();
+        } catch (IOException e) {
+            Log.e("MediaPlayerHelper", "Error preparing player when setting surface", e);
+        }
     }
 
     public void setDataSource(String path) throws IOException {
