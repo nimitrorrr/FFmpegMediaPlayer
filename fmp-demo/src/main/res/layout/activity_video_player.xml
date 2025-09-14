@@ -8,12 +8,34 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/file_recycler_view"
-        android:layout_width="300dp"
-        android:layout_height="match_parent"
-        android:layout_alignParentRight="true"
-        android:background="@android:color/white"
-        android:visibility="gone" />
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:background="#80000000"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/file_name_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFF"
+            android:text="No file selected"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/open_file_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Open File" />
+
+        <Button
+            android:id="@+id/play_pause_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Play/Pause" />
+
+    </LinearLayout>
 
 </RelativeLayout>
