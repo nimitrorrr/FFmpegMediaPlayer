@@ -1,167 +1,97 @@
 package wseemann.media.fmpdemo.activity;
 
-import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
-import android.util.Log;
 import android.view.Surface;
-import android.view.SurfaceHolder;
 import android.view.SurfaceView;
-import android.view.View;
 import android.view.WindowManager;
-import android.view.inputmethod.InputMethodManager;
-import android.widget.Button;
-import android.widget.EditText;
+import android.widget.Toast;
 
 import androidx.fragment.app.FragmentActivity;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
-import java.net.URLDecoder;
+import java.util.List;
 
-import wseemann.media.FFmpegMediaPlayer;
 import wseemann.media.fmpdemo.R;
+import wseemann.media.fmpdemo.adapter.FileListAdapter;
+import wseemann.media.fmpdemo.helper.FileExplorerHelper;
+import wseemann.media.fmpdemo.helper.MediaPlayerHelper;
+import wseemann.media.fmpdemo.helper.SurfaceHelper;
 
-/**
- * Created by wseemann on 4/10/16.
- */
-public class VideoPlayerActivity extends FragmentActivity {
+public class VideoPlayerActivity extends FragmentActivity implements 
+        SurfaceHelper.SurfaceListener,
+        FileListAdapter.OnFileSelectedListener {
 
-    private SurfaceView mmSurfaceView;
-    private SurfaceHolder mSurfaceHolder;
-    private Surface mFinalSurface;
-
-    private FFmpegMediaPlayer mMediaPlayer;
+    private SurfaceView mSurfaceView;
+    private RecyclerView mFileRecyclerView;
+    private SurfaceHelper mSurfaceHelper;
+    private MediaPlayerHelper mMediaPlayerHelper;
+    private FileListAdapter mFileAdapter;
 
     public void onCreate(Bundle icicle) {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         super.onCreate(icicle);
         setContentView(R.layout.activity_video_player);
 
-        final EditText uriText = (EditText) findViewById(R.id.uri);
-        // Uncomment for debugging
-        uriText.setText("https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_1MB.mp4");
-
-        Intent intent = getIntent();
-
-        // Populate the edit text field with the intent uri, if available
-        Uri uri = intent.getData();
-
-        if (intent.getExtras() != null &&
-                intent.getExtras().getCharSequence(Intent.EXTRA_TEXT) != null) {
-            uri = Uri.parse(intent.getExtras().getCharSequence(Intent.EXTRA_TEXT).toString());
-        }
-
-        if (uri != null) {
-            try {
-                uriText.setText(URLDecoder.decode(uri.toString(), "UTF-8"));
-            } catch (UnsupportedEncodingException e1) {
-            }
-        }
-
-        setIntent(null);
-
-        Button goButton = (Button) findViewById(R.id.go_button);
-        goButton.setOnClickListener(new View.OnClickListener() {
-
-            @Override
-            public void onClick(View v) {
-                // Clear the error message
-                uriText.setError(null);
-
-                // Hide the keyboard
-                InputMethodManager imm = (InputMethodManager)
-                        getSystemService(
-                                Context.INPUT_METHOD_SERVICE);
-                imm.hideSoftInputFromWindow(uriText.getWindowToken(), 0);
-
-                String uri = uriText.getText().toString();
-
-                if (uri.equals("")) {
-                    uriText.setError(getString(R.string.uri_error));
-                    return;
-                }
-
-                String uriString = uriText.getText().toString();
-
-                try {
-                    mMediaPlayer.reset();
-
-                    mMediaPlayer.setDataSource(uriString);
-                    if (mFinalSurface != null) {
-                       mMediaPlayer.setSurface(mFinalSurface);
-                    }
-                    mMediaPlayer.prepareAsync();
-                } catch (IOException ex) {
-                    ex.printStackTrace();
-                }
-            }
-        });
-
-        // set up the Surface video sink
-        mmSurfaceView = (SurfaceView) findViewById(R.id.surfaceview);
-        mSurfaceHolder = mmSurfaceView.getHolder();
-
-        mSurfaceHolder.addCallback(new SurfaceHolder.Callback() {
-
-            public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-                Log.v("TAG", "surfaceChanged format=" + format + ", width=" + width + ", height="
-                        + height);
-            }
-
-            public void surfaceCreated(SurfaceHolder holder) {
-                mFinalSurface = holder.getSurface();
-
-                //mMediaPlayer.setSurface(mFinalSurface);
-
-                final EditText uriText = (EditText) findViewById(R.id.uri);
-
-                // Clear the error message
-                uriText.setError(null);
-
-                // Hide the keyboard
-                InputMethodManager imm = (InputMethodManager)
-                        getSystemService(
-                                Context.INPUT_METHOD_SERVICE);
-                imm.hideSoftInputFromWindow(uriText.getWindowToken(), 0);
-
-                String uri = uriText.getText().toString();
-
-                if (uri.equals("")) {
-                    uriText.setError(getString(R.string.uri_error));
-                    return;
-                }
-
-                String uriString = uriText.getText().toString();
-            }
-
-            public void surfaceDestroyed(SurfaceHolder holder) {
-                Log.v("TAG", "surfaceDestroyed");
-            }
-
-        });
-
-        mMediaPlayer = new FFmpegMediaPlayer();
-        mMediaPlayer.setOnPreparedListener(mOnPreparedListener);
-        mMediaPlayer.setOnErrorListener(mOnErrorListener);
-        mMediaPlayer.stop();
+        mSurfaceView = findViewById(R.id.surfaceview);
+        mFileRecyclerView = findViewById(R.id.file_recycler_view);
+        
+        mMediaPlayerHelper = new MediaPlayerHelper();
+        mSurfaceHelper = new SurfaceHelper(mSurfaceView, this);
+        
+        setupFileList();
+        FileExplorerHelper.openDirectoryPicker(this);
     }
 
-    private FFmpegMediaPlayer.OnPreparedListener mOnPreparedListener = mp -> mp.start();
+    private void setupFileList() {
+        mFileAdapter = new FileListAdapter(this);
+        mFileRecyclerView.setLayoutManager(new LinearLayoutManager(this));
+        mFileRecyclerView.setAdapter(mFileAdapter);
+    }
 
-    private FFmpegMediaPlayer.OnErrorListener mOnErrorListener = (mp, what, extra) -> {
-        Log.d(VideoPlayerActivity.class.getName(), "Error: " + what);
-        return true;
-    };
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        
+        if (requestCode == FileExplorerHelper.REQUEST_CODE_OPEN_DIRECTORY && 
+            resultCode == RESULT_OK && data != null) {
+            
+            Uri treeUri = data.getData();
+            getContentResolver().takePersistableUriPermission(treeUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            
+            List<DocumentFile> files = FileExplorerHelper.listFiles(this, treeUri);
+            mFileAdapter.setFiles(files);
+        }
+    }
+
+    @Override
+    public void onSurfaceCreated(Surface surface) {
+        mMediaPlayerHelper.setSurface(surface);
+    }
+
+    @Override
+    public void onSurfaceDestroyed() {
+        mMediaPlayerHelper.setSurface(null);
+    }
+
+    @Override
+    public void onFileSelected(DocumentFile file) {
+        try {
+            mMediaPlayerHelper.setDataSource(file.getUri().toString());
+            Toast.makeText(this, "Playing: " + file.getName(), Toast.LENGTH_SHORT).show();
+        } catch (IOException e) {
+            Toast.makeText(this, "Error playing file", Toast.LENGTH_SHORT).show();
+            e.printStackTrace();
+        }
+    }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
-
-        if (mMediaPlayer != null) {
-            mMediaPlayer.stop();
-            mMediaPlayer.release();
-        }
+        mMediaPlayerHelper.release();
     }
 }
