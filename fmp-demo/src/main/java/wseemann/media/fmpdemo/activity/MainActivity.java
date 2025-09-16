@@ -1,25 +1,6 @@
-/*
- * FFmpegMediaPlayer: A unified interface for playing audio files and streams.
- *
- * Copyright 2014 William Seemann
- * 
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package wseemann.media.fmpdemo.activity;
 
 import wseemann.media.fmpdemo.R;
-import wseemann.media.fmpdemo.fragment.MediaPlayerFragment;
 import wseemann.media.fmpdemo.service.IMediaPlaybackService;
 import wseemann.media.fmpdemo.service.MediaPlaybackService;
 import wseemann.media.fmpdemo.service.MusicUtils;
@@ -32,167 +13,63 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
-import android.content.res.Configuration;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Rect;
 import android.media.AudioManager;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
-import android.os.Parcelable;
 import android.os.RemoteException;
-import android.os.SystemClock;
+import android.util.AttributeSet;
 import android.util.Log;
-import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.ImageButton;
-import android.widget.ProgressBar;
-import android.widget.SeekBar;
-import android.widget.TextView;
+import android.widget.LinearLayout;
 import android.widget.Toast;
-import android.widget.SeekBar.OnSeekBarChangeListener;
 
-import androidx.fragment.app.DialogFragment;
-import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentActivity;
-import androidx.fragment.app.FragmentManager;
-import androidx.fragment.app.FragmentStatePagerAdapter;
-import androidx.viewpager.widget.ViewPager;
 
-public class MediaPlayerActivity extends FragmentActivity {
-	
-    private static final String TAG = MediaPlayerActivity.class.getName();
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
-	private DialogFragment mLoadingDialog;
-	
-    private static int VISIBLE = 1;
-    private static int GONE = 2;
+public class MainActivity extends FragmentActivity {
     
-    private boolean mSeeking = false;
-    private boolean mDeviceHasDpad;
-    private long mStartSeekPos = 0;
-    private long mLastSeekEventTime;
+    private static final String TAG = MainActivity.class.getName();
+    private static final String SKIN_PATH = "/storage/emulated/0/winamp_skin/";
+    
     private IMediaPlaybackService mService = null;
-    private ImageButton mPrevButton;
-    private ImageButton mPauseButton;
-    private ImageButton mNextButton;
-    private ImageButton mRepeatButton;
-    private ImageButton mShuffleButton;
-    private Toast mToast;
     private ServiceToken mToken;
-
-	private ViewPager mPager;
-	private GridPagerAdapter mAdapter;
+    private SkinWindow mSkinWindow;
+    private boolean paused = false;
     
-    public MediaPlayerActivity()
-    {
-    }
+    private static final int REFRESH = 1;
+    private static final int QUIT = 2;
 
-    /** Called when the activity is first created. */
     @Override
-    public void onCreate(Bundle icicle) {
-    	getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        super.onCreate(icicle);
-        setContentView(R.layout.activity_media_player);
+    public void onCreate(Bundle savedInstanceState) {
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        super.onCreate(savedInstanceState);
         
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
-
-        mCurrentTime = (TextView) findViewById(R.id.position_text);
-        mTotalTime = (TextView) findViewById(R.id.duration_text);
-        mProgress = (ProgressBar) findViewById(R.id.seek_bar);
-
-        mPrevButton = (ImageButton) findViewById(R.id.previous_button);
-        mPrevButton.setOnClickListener(mPrevListener);
-        mPauseButton = (ImageButton) findViewById(R.id.play_pause_button);
-        mPauseButton.setOnClickListener(mPauseListener);
-        mNextButton = (ImageButton) findViewById(R.id.next_button);
-        mNextButton.setOnClickListener(mNextListener);
-        seekmethod = 1;
-
-        mDeviceHasDpad = (getResources().getConfiguration().navigation ==
-            Configuration.NAVIGATION_DPAD);
         
-        mShuffleButton = (ImageButton) findViewById(R.id.shuffle_button);
-        mShuffleButton.setOnClickListener(mShuffleListener);        
-        mRepeatButton = (ImageButton) findViewById(R.id.repeat_button);
-        mRepeatButton.setOnClickListener(mRepeatListener);
-        
-        if (mProgress instanceof SeekBar) {
-            SeekBar seeker = (SeekBar) mProgress;
-            seeker.setOnSeekBarChangeListener(mSeekListener);
-        }
-        mProgress.setMax(1000);
-        
-        mPager = (ViewPager) findViewById(R.id.pager);
+        // Создаем SkinWindow и устанавливаем как контент
+        mSkinWindow = new SkinWindow(this);
+        setContentView(mSkinWindow);
     }
     
-    private OnSeekBarChangeListener mSeekListener = new OnSeekBarChangeListener() {
-        public void onStartTrackingTouch(SeekBar bar) {
-            mLastSeekEventTime = 0;
-            mFromTouch = true;
-        }
-        public void onProgressChanged(SeekBar bar, int progress, boolean fromuser) {
-            if (!fromuser || (mService == null)) return;
-            long now = SystemClock.elapsedRealtime();
-            if ((now - mLastSeekEventTime) > 250) {
-                mLastSeekEventTime = now;
-                mPosOverride = mDuration * progress / 1000;
-                try {
-                    mService.seek(mPosOverride);
-                } catch (RemoteException ex) {
-                }
-
-                // trackball event, allow progress updates
-                if (!mFromTouch) {
-                    refreshNow();
-                    mPosOverride = -1;
-                }
-            }
-        }
-        public void onStopTrackingTouch(SeekBar bar) {
-            mPosOverride = -1;
-            mFromTouch = false;
-        }
-    };
-
-    private View.OnClickListener mShuffleListener = new View.OnClickListener() {
-        public void onClick(View v) {
-            toggleShuffle();
-        }
-    };
-
-    private View.OnClickListener mRepeatListener = new View.OnClickListener() {
-        public void onClick(View v) {
-            cycleRepeat();
-        }
-    };
-
-    private View.OnClickListener mPauseListener = new View.OnClickListener() {
-        public void onClick(View v) {
-            doPauseResume();
-        }
-    };
-    
-    private View.OnClickListener mPrevListener = new View.OnClickListener() {
-        public void onClick(View v) {
-            if (mService == null) return;
-            try {
-                mService.prev();
-            } catch (RemoteException ex) {
-            }
-        }
-    };
-
-    private View.OnClickListener mNextListener = new View.OnClickListener() {
-        public void onClick(View v) {
-            if (mService == null) return;
-            try {
-                mService.next();
-            } catch (RemoteException ex) {
-            }
-        }
-    };
-
     @Override
     public void onStart() {
         super.onStart();
@@ -200,573 +77,46 @@ public class MediaPlayerActivity extends FragmentActivity {
         
         mToken = MusicUtils.bindToService(this, osc);
         if (mToken == null) {
-            // something went wrong
             mHandler.sendEmptyMessage(QUIT);
         }
         
         IntentFilter f = new IntentFilter();
         f.addAction(MediaPlaybackService.PLAYSTATE_CHANGED);
         f.addAction(MediaPlaybackService.META_CHANGED);
-        //f.addAction(MediaPlaybackService.START_DIALOG);
-        //f.addAction(MediaPlaybackService.STOP_DIALOG);
-        registerReceiver(mStatusListener, new IntentFilter(f));
-        updateTrackInfo();
-        long next = refreshNow();
-        queueNextRefresh(next);
+        registerReceiver(mStatusListener, f);
     }
     
-    @Override
-    public void onResume() {
-        super.onResume();
-        updateTrackInfo();
-        setPauseButtonImage();
-    }
-
-    @Override
-    public void onPause() {
-    	super.onPause();
-    	dismissLoadingDialog();
-    }
-
     @Override
     public void onStop() {
         paused = true;
         mHandler.removeMessages(REFRESH);
-        unregisterReceiver(mStatusListener);
-        MusicUtils.unbindFromService(mToken);
+        if (mStatusListener != null) {
+            unregisterReceiver(mStatusListener);
+        }
+        if (mToken != null) {
+            MusicUtils.unbindFromService(mToken);
+        }
         mService = null;
         super.onStop();
     }
-
-    private final int keyboard[][] = {
-        {
-            KeyEvent.KEYCODE_Q,
-            KeyEvent.KEYCODE_W,
-            KeyEvent.KEYCODE_E,
-            KeyEvent.KEYCODE_R,
-            KeyEvent.KEYCODE_T,
-            KeyEvent.KEYCODE_Y,
-            KeyEvent.KEYCODE_U,
-            KeyEvent.KEYCODE_I,
-            KeyEvent.KEYCODE_O,
-            KeyEvent.KEYCODE_P,
-        },
-        {
-            KeyEvent.KEYCODE_A,
-            KeyEvent.KEYCODE_S,
-            KeyEvent.KEYCODE_D,
-            KeyEvent.KEYCODE_F,
-            KeyEvent.KEYCODE_G,
-            KeyEvent.KEYCODE_H,
-            KeyEvent.KEYCODE_J,
-            KeyEvent.KEYCODE_K,
-            KeyEvent.KEYCODE_L,
-            KeyEvent.KEYCODE_DEL,
-        },
-        {
-            KeyEvent.KEYCODE_Z,
-            KeyEvent.KEYCODE_X,
-            KeyEvent.KEYCODE_C,
-            KeyEvent.KEYCODE_V,
-            KeyEvent.KEYCODE_B,
-            KeyEvent.KEYCODE_N,
-            KeyEvent.KEYCODE_M,
-            KeyEvent.KEYCODE_COMMA,
-            KeyEvent.KEYCODE_PERIOD,
-            KeyEvent.KEYCODE_ENTER
+    
+    private ServiceConnection osc = new ServiceConnection() {
+        public void onServiceConnected(ComponentName classname, IBinder obj) {
+            mService = IMediaPlaybackService.Stub.asInterface(obj);
+            mSkinWindow.setMediaService(mService);
+            startPlayback();
         }
-
+        public void onServiceDisconnected(ComponentName classname) {
+            mService = null;
+        }
     };
-
-    private int lastX;
-    private int lastY;
-
-    private boolean seekMethod1(int keyCode)
-    {
-        if (mService == null) return false;
-        for(int x=0;x<10;x++) {
-            for(int y=0;y<3;y++) {
-                if(keyboard[y][x] == keyCode) {
-                    int dir = 0;
-                    // top row
-                    if(x == lastX && y == lastY) dir = 0;
-                    else if (y == 0 && lastY == 0 && x > lastX) dir = 1;
-                    else if (y == 0 && lastY == 0 && x < lastX) dir = -1;
-                    // bottom row
-                    else if (y == 2 && lastY == 2 && x > lastX) dir = -1;
-                    else if (y == 2 && lastY == 2 && x < lastX) dir = 1;
-                    // moving up
-                    else if (y < lastY && x <= 4) dir = 1; 
-                    else if (y < lastY && x >= 5) dir = -1; 
-                    // moving down
-                    else if (y > lastY && x <= 4) dir = -1; 
-                    else if (y > lastY && x >= 5) dir = 1; 
-                    lastX = x;
-                    lastY = y;
-                    try {
-                        mService.seek(mService.position() + dir * 5);
-                    } catch (RemoteException ex) {
-                    }
-                    refreshNow();
-                    return true;
-                }
-            }
-        }
-        lastX = -1;
-        lastY = -1;
-        return false;
-    }
-
-    private boolean seekMethod2(int keyCode)
-    {
-        if (mService == null) return false;
-        for(int i=0;i<10;i++) {
-            if(keyboard[0][i] == keyCode) {
-                int seekpercentage = 100*i/10;
-                try {
-                    mService.seek(mService.duration() * seekpercentage / 100);
-                } catch (RemoteException ex) {
-                }
-                refreshNow();
-                return true;
-            }
-        }
-        return false;
-    }
-
-    @Override
-    public boolean onKeyUp(int keyCode, KeyEvent event) {
-        try {
-            switch(keyCode)
-            {
-                case KeyEvent.KEYCODE_DPAD_LEFT:
-                    if (!useDpadMusicControl()) {
-                        break;
-                    }
-                    if (mService != null) {
-                        if (!mSeeking && mStartSeekPos >= 0) {
-                            mPauseButton.requestFocus();
-                            if (mStartSeekPos < 1000) {
-                                mService.prev();
-                            } else {
-                                mService.seek(0);
-                            }
-                        } else {
-                            scanBackward(-1, event.getEventTime() - event.getDownTime());
-                            mPauseButton.requestFocus();
-                            mStartSeekPos = -1;
-                        }
-                    }
-                    mSeeking = false;
-                    mPosOverride = -1;
-                    return true;
-                case KeyEvent.KEYCODE_DPAD_RIGHT:
-                    if (!useDpadMusicControl()) {
-                        break;
-                    }
-                    if (mService != null) {
-                        if (!mSeeking && mStartSeekPos >= 0) {
-                            mPauseButton.requestFocus();
-                            mService.next();
-                        } else {
-                            scanForward(-1, event.getEventTime() - event.getDownTime());
-                            mPauseButton.requestFocus();
-                            mStartSeekPos = -1;
-                        }
-                    }
-                    mSeeking = false;
-                    mPosOverride = -1;
-                    return true;
-            }
-        } catch (RemoteException ex) {
-        }
-        return super.onKeyUp(keyCode, event);
-    }
-
-    private boolean useDpadMusicControl() {
-        if (mDeviceHasDpad && (mPrevButton.isFocused() ||
-                mNextButton.isFocused() ||
-                mPauseButton.isFocused())) {
-            return true;
-        }
-        return false;
-    }
-
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event)
-    {
-        int repcnt = event.getRepeatCount();
-
-        if((seekmethod==0)?seekMethod1(keyCode):seekMethod2(keyCode))
-            return true;
-
-        switch(keyCode)
-        {
-            case KeyEvent.KEYCODE_SLASH:
-                seekmethod = 1 - seekmethod;
-                return true;
-
-            case KeyEvent.KEYCODE_DPAD_LEFT:
-                if (!useDpadMusicControl()) {
-                    break;
-                }
-                if (!mPrevButton.hasFocus()) {
-                    mPrevButton.requestFocus();
-                }
-                scanBackward(repcnt, event.getEventTime() - event.getDownTime());
-                return true;
-            case KeyEvent.KEYCODE_DPAD_RIGHT:
-                if (!useDpadMusicControl()) {
-                    break;
-                }
-                if (!mNextButton.hasFocus()) {
-                    mNextButton.requestFocus();
-                }
-                scanForward(repcnt, event.getEventTime() - event.getDownTime());
-                return true;
-
-            case KeyEvent.KEYCODE_S:
-                toggleShuffle();
-                return true;
-
-            case KeyEvent.KEYCODE_DPAD_CENTER:
-            case KeyEvent.KEYCODE_SPACE:
-                doPauseResume();
-                return true;
-        }
-        return super.onKeyDown(keyCode, event);
-    }
-    
-    private void scanBackward(int repcnt, long delta) {
-        if(mService == null) return;
-        try {
-            if(repcnt == 0) {
-                mStartSeekPos = mService.position();
-                mLastSeekEventTime = 0;
-                mSeeking = false;
-            } else {
-                mSeeking = true;
-                if (delta < 5000) {
-                    // seek at 10x speed for the first 5 seconds
-                    delta = delta * 10; 
-                } else {
-                    // seek at 40x after that
-                    delta = 50000 + (delta - 5000) * 40;
-                }
-                long newpos = mStartSeekPos - delta;
-                if (newpos < 0) {
-                    // move to previous track
-                    mService.prev();
-                    long duration = mService.duration();
-                    mStartSeekPos += duration;
-                    newpos += duration;
-                }
-                if (((delta - mLastSeekEventTime) > 250) || repcnt < 0){
-                    mService.seek(newpos);
-                    mLastSeekEventTime = delta;
-                }
-                if (repcnt >= 0) {
-                    mPosOverride = newpos;
-                } else {
-                    mPosOverride = -1;
-                }
-                refreshNow();
-            }
-        } catch (RemoteException ex) {
-        }
-    }
-
-    private void scanForward(int repcnt, long delta) {
-        if(mService == null) return;
-        try {
-            if(repcnt == 0) {
-                mStartSeekPos = mService.position();
-                mLastSeekEventTime = 0;
-                mSeeking = false;
-            } else {
-                mSeeking = true;
-                if (delta < 5000) {
-                    // seek at 10x speed for the first 5 seconds
-                    delta = delta * 10; 
-                } else {
-                    // seek at 40x after that
-                    delta = 50000 + (delta - 5000) * 40;
-                }
-                long newpos = mStartSeekPos + delta;
-                long duration = mService.duration();
-                if (newpos >= duration) {
-                    // move to next track
-                    mService.next();
-                    mStartSeekPos -= duration; // is OK to go negative
-                    newpos -= duration;
-                }
-                if (((delta - mLastSeekEventTime) > 250) || repcnt < 0){
-                    mService.seek(newpos);
-                    mLastSeekEventTime = delta;
-                }
-                if (repcnt >= 0) {
-                    mPosOverride = newpos;
-                } else {
-                    mPosOverride = -1;
-                }
-                refreshNow();
-            }
-        } catch (RemoteException ex) {
-        }
-    }
-    
-    private void doPauseResume() {
-        try {
-            if(mService != null) {
-                if (mService.isPlaying()) {
-                    mService.pause();
-                } else {
-                    mService.play();
-                }
-                refreshNow();
-                setPauseButtonImage();
-            }
-        } catch (RemoteException ex) {
-        }
-    }
-    
-    private void toggleShuffle() {
-        if (mService == null) {
-            return;
-        }
-        try {
-            int shuffle = mService.getShuffleMode();
-            if (shuffle == MediaPlaybackService.SHUFFLE_NONE) {
-            	mService.setShuffleMode(MediaPlaybackService.SHUFFLE_NORMAL);
-                if (mService.getRepeatMode() == MediaPlaybackService.REPEAT_CURRENT) {
-                	mService.setRepeatMode(MediaPlaybackService.REPEAT_ALL);
-                    setRepeatButtonImage();
-                }
-                showToast(R.string.shuffle_on_notif);
-            } else if (shuffle == MediaPlaybackService.SHUFFLE_NORMAL) {
-            	mService.setShuffleMode(MediaPlaybackService.SHUFFLE_NONE);
-                showToast(R.string.shuffle_off_notif);
-            } else {
-                Log.e(TAG, "Invalid shuffle mode: " + shuffle);
-            }
-            setShuffleButtonImage();
-        } catch (RemoteException ex) {
-        }
-    }
-    
-    private void cycleRepeat() {
-        if (mService == null) {
-            return;
-        }
-        try {
-            int mode = mService.getRepeatMode();
-            if (mode == MediaPlaybackService.REPEAT_NONE) {
-                mService.setRepeatMode(MediaPlaybackService.REPEAT_ALL);
-                showToast(R.string.repeat_all_notif);
-            } else if (mode == MediaPlaybackService.REPEAT_ALL) {
-                mService.setRepeatMode(MediaPlaybackService.REPEAT_CURRENT);
-                if (mService.getShuffleMode() != MediaPlaybackService.SHUFFLE_NONE) {
-                    mService.setShuffleMode(MediaPlaybackService.SHUFFLE_NONE);
-                    setShuffleButtonImage();
-                }
-                showToast(R.string.repeat_current_notif);
-            } else {
-                mService.setRepeatMode(MediaPlaybackService.REPEAT_NONE);
-                showToast(R.string.repeat_off_notif);
-            }
-            setRepeatButtonImage();
-        } catch (RemoteException ex) {
-        }
-    }
-    
-    private void showToast(int resid) {
-        if (mToast == null) {
-            mToast = Toast.makeText(this, null, Toast.LENGTH_SHORT);
-        }
-        mToast.setText(resid);
-        mToast.show();
-    }
     
     private void startPlayback() {
-
-        if(mService == null)
-            return;
-
-        updateTrackInfo();
+        if (mService == null) return;
         long next = refreshNow();
         queueNextRefresh(next);
     }
-
-    private ServiceConnection osc = new ServiceConnection() {
-            public void onServiceConnected(ComponentName classname, IBinder obj) {
-                mService = IMediaPlaybackService.Stub.asInterface(obj);
-                startPlayback();
-                try {
-                    // Assume something is playing when the service says it is,
-                    // but also if the audio ID is valid but the service is paused.
-                    if (mService.getAudioId() >= 0 || mService.isPlaying() ||
-                            mService.getPath() != null) {
-                        // something is playing now, we're done
-                        mRepeatButton.setVisibility(View.VISIBLE);
-                        mShuffleButton.setVisibility(View.VISIBLE);
-                        setRepeatButtonImage();
-                        setShuffleButtonImage();
-                        setPauseButtonImage();
-                        initPager();
-                        return;
-                    }
-                } catch (RemoteException ex) {
-                }
-                // Service is dead or not playing anything. Return to the previous
-                // activity.
-                finish();
-            }
-            public void onServiceDisconnected(ComponentName classname) {
-                mService = null;
-            }
-    };
     
-    private void setRepeatButtonImage() {
-        if (mService == null) return;
-        try {
-            switch (mService.getRepeatMode()) {
-                case MediaPlaybackService.REPEAT_ALL:
-                    //mRepeatButton.setImageResource(R.drawable.ic_av_repeat_selected);
-                    break;
-                case MediaPlaybackService.REPEAT_CURRENT:
-                    //mRepeatButton.setImageResource(R.drawable.ic_av_repeat_one_selected);
-                    break;
-                default:
-                    //mRepeatButton.setImageResource(Utils.getThemedIcon(this, R.attr.ic_av_repeat));
-                    break;
-            }
-        } catch (RemoteException ex) {
-        }
-    }
-    
-    private void setShuffleButtonImage() {
-        if (mService == null) return;
-        try {
-            switch (mService.getShuffleMode()) {
-                case MediaPlaybackService.SHUFFLE_NONE:
-                    //mShuffleButton.setImageResource(Utils.getThemedIcon(this, R.attr.ic_av_shuffle));
-                    break;
-                default:
-                    //mShuffleButton.setImageResource(R.drawable.ic_av_shuffle_selected);
-                    break;
-            }
-        } catch (RemoteException ex) {
-        }
-    }
-    
-    private void setPauseButtonImage() {
-        try {
-            if (mService != null && mService.isPlaying()) {
-                mPauseButton.setImageResource(R.drawable.ic_av_pause_over_video_large_light);
-            } else {
-                mPauseButton.setImageResource(R.drawable.ic_av_play_over_video_large_light);
-            }
-        } catch (RemoteException ex) {
-        }
-    }
-    
-    private void setSeekControls() {
-    	if (mService == null) {
-    		return;
-    	}
-    	
-    	try {
-			if (mService.duration() > 0) {
-				mProgress.setEnabled(true);
-			} else {
-				mProgress.setEnabled(false);
-			}
-		} catch (RemoteException e) {
-		}	
-    }
-    
-    private void initPager() {
-    	if (mService == null) {
-    		return;
-        }
-     	
-    	int count = 0;
-    	
-    	try {
-			count = mService.getQueue().length + 2;
-		} catch (RemoteException e) {
-			finish();
-		}
-    	
-    	mAdapter = new GridPagerAdapter(getSupportFragmentManager(), count);
-        mPager.setAdapter(mAdapter);
-        mPager.setOnPageChangeListener(new ViewPager.OnPageChangeListener() {
-
-        	boolean mFromUser = false;
-        	
-			@Override
-			public void onPageScrollStateChanged(int state) {
-				if (state == ViewPager.SCROLL_STATE_DRAGGING) {
-					mFromUser = true;
-			    } else if (state == ViewPager.SCROLL_STATE_IDLE) {
-			    	mFromUser = false;
-			    }
-			}
-
-			@Override
-			public void onPageScrolled(int position, float positionOffset, int positionOffsetPixels) {
-				
-			}
-
-			@Override
-			public void onPageSelected(int position) {
-				try {
-					if (mFromUser) {
-						position--;
-						
-						if (position == -1) {
-							position = mService.getQueue().length - 1;
-						} else if (position == mService.getQueue().length) {
-							position = 0;
-						}
-						
-						mService.setQueuePosition(position);
-						mFromUser = false;
-					}
-				} catch (RemoteException e) {
-					e.printStackTrace();
-				}
-			}
-        });
-        
-        setPager();
-    }
-    
-    private void setPager() {
-        if (mService == null) {
-            return;
-        }
-    	
-        try {
-        	int position = mService.getQueuePosition() + 1;
-			mPager.setCurrentItem(position, false);
-		} catch (RemoteException e) {
-			e.printStackTrace();
-		}
-    }
-    
-    private TextView mCurrentTime;
-    private TextView mTotalTime;
-    private ProgressBar mProgress;
-    private long mPosOverride = -1;
-    private boolean mFromTouch = false;
-    private long mDuration;
-    private int seekmethod;
-    private boolean paused;
-
-    private static final int REFRESH = 1;
-    private static final int QUIT = 2;
-
     private void queueNextRefresh(long delay) {
         if (!paused) {
             Message msg = mHandler.obtainMessage(REFRESH);
@@ -776,46 +126,9 @@ public class MediaPlayerActivity extends FragmentActivity {
     }
 
     private long refreshNow() {
-        if(mService == null)
-            return 500;
-        try {
-            long pos = mPosOverride < 0 ? mService.position() : mPosOverride;
-            if ((pos >= 0)) {
-                mCurrentTime.setText(MusicUtils.makeTimeString(this, pos / 1000));
-                if (mDuration > 0) {
-                	mProgress.setProgress((int) (1000 * pos / mDuration));
-                } else {
-                	mProgress.setProgress(1000);
-                }
-                
-                if (mService.isPlaying()) {
-                    mCurrentTime.setVisibility(View.VISIBLE);
-                } else {
-                    // blink the counter
-                    int vis = mCurrentTime.getVisibility();
-                    mCurrentTime.setVisibility(vis == View.INVISIBLE ? View.VISIBLE : View.INVISIBLE);
-                    return 500;
-                }
-            } else {
-                mCurrentTime.setText("--:--");
-                mProgress.setProgress(1000);
-            }
-            // calculate the number of milliseconds until the next full second, so
-            // the counter can be updated at just the right time
-            long remaining = 1000 - (pos % 1000);
-
-            // approximate how often we would need to refresh the slider to
-            // move it smoothly
-            int width = mProgress.getWidth();
-            if (width == 0) width = 320;
-            long smoothrefreshtime = mDuration / width;
-
-            if (smoothrefreshtime > remaining) return remaining;
-            if (smoothrefreshtime < 20) return 20;
-            return smoothrefreshtime;
-        } catch (RemoteException ex) {
-        }
-        return 500;
+        if (mService == null) return 500;
+        mSkinWindow.updateDisplay();
+        return 1000; // Обновляем каждую секунду
     }
     
     private final Handler mHandler = new Handler() {
@@ -826,13 +139,10 @@ public class MediaPlayerActivity extends FragmentActivity {
                     long next = refreshNow();
                     queueNextRefresh(next);
                     break;
-                    
                 case QUIT:
-                    // This can be moved back to onCreate once the bug that prevents
-                    // Dialogs from being started from onCreate/onResume is fixed.
-                    new AlertDialog.Builder(MediaPlayerActivity.this)
-                            .setTitle(R.string.service_start_error_title)
-                            .setMessage(R.string.service_start_error_msg)
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("Service Error")
+                            .setMessage("Cannot start media service")
                             .setPositiveButton(android.R.string.ok,
                                     new DialogInterface.OnClickListener() {
                                         public void onClick(DialogInterface dialog, int whichButton) {
@@ -842,9 +152,6 @@ public class MediaPlayerActivity extends FragmentActivity {
                             .setCancelable(false)
                             .show();
                     break;
-
-                default:
-                    break;
             }
         }
     };
@@ -853,74 +160,378 @@ public class MediaPlayerActivity extends FragmentActivity {
         @Override
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
-            if (action.equals(MediaPlaybackService.META_CHANGED)) {
-                // redraw the artist/title info and
-                // set new max for progress bar
-                updateTrackInfo();
-                setSeekControls();
-                setPauseButtonImage();
-                queueNextRefresh(1);
-                setPager();
-            } else if (action.equals(MediaPlaybackService.PLAYSTATE_CHANGED)) {
-                setPauseButtonImage();
+            if (action.equals(MediaPlaybackService.META_CHANGED) || 
+                action.equals(MediaPlaybackService.PLAYSTATE_CHANGED)) {
+                if (mSkinWindow != null) {
+                    mSkinWindow.updateDisplay();
+                }
             }
-            /*else if (action.equals(MediaPlaybackService.START_DIALOG)) {
-	        	if (mParentActivityState == VISIBLE) {
-	        		showLoadingDialog();
-	        	}
-            } else if (action.equals(MediaPlaybackService.STOP_DIALOG)) {
-            	if (mParentActivityState == VISIBLE) {
-            		dismissLoadingDialog();
-            	}
-            }*/
         }
     };
     
-    private void updateTrackInfo() {
-        if (mService == null) {
-            return;
+    // SkinWindow класс - основной класс для рендеринга скинов
+    public static class SkinWindow extends View {
+        
+        private Map<String, Bitmap> skinBitmaps;
+        private Map<String, Rect> buttonRegions;
+        private IMediaPlaybackService mService;
+        private Paint paint;
+        private float scaleX = 1.0f, scaleY = 1.0f;
+        private int windowType = 0; // 0 = Main, 1 = Equalizer, 2 = Playlist
+        
+        // Размеры оригинальных окон Winamp
+        private static final int MAIN_WIDTH = 275;
+        private static final int MAIN_HEIGHT = 116;
+        
+        public SkinWindow(Context context) {
+            super(context);
+            init();
         }
-        try {
-        	mDuration = mService.duration();
-        	mTotalTime.setText(MusicUtils.makeTimeString(this, mDuration / 1000));
-        } catch (RemoteException ex) {
-        	finish();
+        
+        public SkinWindow(Context context, AttributeSet attrs) {
+            super(context, attrs);
+            init();
         }
-    }
-    
-	public synchronized void showLoadingDialog() {
-		//mLoadingDialog = LoadingDialog.newInstance(this, getString(R.string.opening_url_message));
-		//mLoadingDialog.show(getSupportFragmentManager(), LOADING_DIALOG);
-	}
-	
-	public synchronized void dismissLoadingDialog() {
-		if (mLoadingDialog != null) {
-			mLoadingDialog.dismiss();
-			mLoadingDialog = null;
-		}
-	}
-	
-	private class GridPagerAdapter extends FragmentStatePagerAdapter {
-    	private int mCount;
-		
-		public GridPagerAdapter(FragmentManager fm, int count) {
-    		super(fm);
-    		mCount = count;
+        
+        private void init() {
+            paint = new Paint();
+            paint.setAntiAlias(true);
+            skinBitmaps = new HashMap<>();
+            buttonRegions = new HashMap<>();
+            loadSkin();
         }
-    	
-        @Override
-        public Fragment getItem(int position) {
-            return new MediaPlayerFragment();
+        
+        private void loadSkin() {
+            try {
+                File skinDir = new File(SKIN_PATH);
+                if (!skinDir.exists()) {
+                    showError("Skin folder not found: " + SKIN_PATH);
+                    return;
+                }
+                
+                File[] wszFiles = skinDir.listFiles((dir, name) -> 
+                    name.toLowerCase().endsWith(".wsz"));
+                
+                if (wszFiles == null || wszFiles.length == 0) {
+                    showError("No .wsz skin files found in " + SKIN_PATH);
+                    return;
+                }
+                
+                // Берем первый найденный .wsz файл
+                File skinFile = wszFiles[0];
+                extractAndLoadSkin(skinFile);
+                
+            } catch (Exception e) {
+                Log.e(TAG, "Error loading skin", e);
+                showError("Error loading skin: " + e.getMessage());
+            }
         }
-
-        @Override
-        public int getCount() {
-        	return mCount;
+        
+        private void extractAndLoadSkin(File wszFile) throws IOException {
+            // Создаем временную папку для извлечения
+            File tempDir = new File(getContext().getCacheDir(), "skin_temp");
+            if (tempDir.exists()) {
+                deleteRecursive(tempDir);
+            }
+            tempDir.mkdirs();
+            
+            // Извлекаем .wsz (ZIP) файл
+            try (ZipInputStream zis = new ZipInputStream(new FileInputStream(wszFile))) {
+                ZipEntry entry;
+                byte[] buffer = new byte[1024];
+                
+                while ((entry = zis.getNextEntry()) != null) {
+                    if (entry.isDirectory()) continue;
+                    
+                    File outFile = new File(tempDir, entry.getName());
+                    outFile.getParentFile().mkdirs();
+                    
+                    try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                        int len;
+                        while ((len = zis.read(buffer)) > 0) {
+                            fos.write(buffer, 0, len);
+                        }
+                    }
+                }
+            }
+            
+            // Загружаем bitmap'ы
+            loadBitmaps(tempDir);
+        }
+        
+        private void loadBitmaps(File skinDir) {
+            String[] bitmapNames = {
+                "main.bmp", "cbuttons.bmp", "titlebar.bmp", 
+                "text.bmp", "numbers.bmp", "volume.bmp", 
+                "balance.bmp", "monoster.bmp", "playpaus.bmp",
+                "pledit.bmp", "eqmain.bmp", "eq_ex.bmp"
+            };
+            
+            for (String name : bitmapNames) {
+                File bmpFile = new File(skinDir, name);
+                if (bmpFile.exists()) {
+                    try {
+                        Bitmap bitmap = BitmapFactory.decodeFile(bmpFile.getAbsolutePath());
+                        if (bitmap != null) {
+                            skinBitmaps.put(name, bitmap);
+                        }
+                    } catch (Exception e) {
+                        Log.w(TAG, "Could not load bitmap: " + name, e);
+                    }
+                }
+            }
+            
+            // Загружаем region данные
+            loadRegions(skinDir);
+            
+            Log.i(TAG, "Loaded " + skinBitmaps.size() + " skin bitmaps");
+        }
+        
+        private void deleteRecursive(File fileOrDirectory) {
+            if (fileOrDirectory.isDirectory()) {
+                for (File child : fileOrDirectory.listFiles()) {
+                    deleteRecursive(child);
+                }
+            }
+            fileOrDirectory.delete();
+        }
+        
+        private void loadRegions(File skinDir) {
+            // Ищем файлы с region данными
+            File[] regionFiles = {
+                new File(skinDir, "region.txt"),
+                new File(skinDir, "main.rgn"),
+                new File(skinDir, "pledit.rgn"),
+                new File(skinDir, "eqmain.rgn")
+            };
+            
+            for (File regionFile : regionFiles) {
+                if (regionFile.exists()) {
+                    parseRegionFile(regionFile);
+                }
+            }
+            
+            // Если region файлы не найдены, используем стандартные координаты
+            if (buttonRegions.isEmpty()) {
+                setupDefaultRegions();
+            }
+            
+            Log.i(TAG, "Loaded " + buttonRegions.size() + " button regions");
+        }
+        
+        private void parseRegionFile(File regionFile) {
+            try {
+                if (regionFile.getName().equals("region.txt")) {
+                    parseRegionTxt(regionFile);
+                } else if (regionFile.getName().endsWith(".rgn")) {
+                    parseRgnFile(regionFile);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Error parsing region file: " + regionFile.getName(), e);
+            }
+        }
+        
+        private void parseRegionTxt(File file) throws IOException {
+            // Парсим region.txt файл
+            // Формат обычно: ButtonName=x1,y1,x2,y2
+            java.util.Scanner scanner = new java.util.Scanner(file);
+            while (scanner.hasNextLine()) {
+                String line = scanner.nextLine().trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                
+                String[] parts = line.split("=");
+                if (parts.length == 2) {
+                    String buttonName = parts[0].trim();
+                    String[] coords = parts[1].split(",");
+                    if (coords.length == 4) {
+                        try {
+                            int x1 = Integer.parseInt(coords[0].trim());
+                            int y1 = Integer.parseInt(coords[1].trim());
+                            int x2 = Integer.parseInt(coords[2].trim());
+                            int y2 = Integer.parseInt(coords[3].trim());
+                            buttonRegions.put(buttonName.toLowerCase(), new Rect(x1, y1, x2, y2));
+                        } catch (NumberFormatException e) {
+                            Log.w(TAG, "Invalid coordinates in region.txt: " + line);
+                        }
+                    }
+                }
+            }
+            scanner.close();
+        }
+        
+        private void parseRgnFile(File file) throws IOException {
+            // Парсим .rgn файл (бинарный формат)
+            // Для простоты пока используем стандартные координаты
+            // TODO: Реализовать полный парсинг .rgn формата
+            setupDefaultRegions();
+        }
+        
+        private void setupDefaultRegions() {
+            // Стандартные координаты кнопок для Winamp 2.91
+            buttonRegions.put("previous", new Rect(16, 88, 44, 104));
+            buttonRegions.put("play", new Rect(45, 88, 73, 104));
+            buttonRegions.put("pause", new Rect(45, 88, 73, 104));
+            buttonRegions.put("stop", new Rect(104, 88, 132, 104));
+            buttonRegions.put("next", new Rect(74, 88, 102, 104));
+            buttonRegions.put("eject", new Rect(133, 89, 153, 109));
+            
+            // Дополнительные элементы
+            buttonRegions.put("shuffle", new Rect(164, 89, 180, 109));
+            buttonRegions.put("repeat", new Rect(181, 89, 197, 109));
+            buttonRegions.put("volume", new Rect(107, 57, 147, 68));
+            buttonRegions.put("balance", new Rect(177, 57, 217, 68));
+            buttonRegions.put("position", new Rect(16, 72, 248, 82));
+        }
+        
+        private void showError(String message) {
+            Toast.makeText(getContext(), message, Toast.LENGTH_LONG).show();
+            Log.e(TAG, message);
+        }
+        
+        public void setMediaService(IMediaPlaybackService service) {
+            mService = service;
+            updateDisplay();
         }
         
         @Override
-        public Parcelable saveState() {
-        	return null;
+        protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+            super.onSizeChanged(w, h, oldw, oldh);
+            // Вычисляем масштаб для растягивания скина
+            scaleX = (float) w / MAIN_WIDTH;
+            scaleY = (float) h / MAIN_HEIGHT;
+            invalidate();
+        }
+        
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            
+            if (skinBitmaps.isEmpty()) {
+                // Рисуем заглушку если скин не загружен
+                paint.setColor(0xFF333333);
+                canvas.drawRect(0, 0, getWidth(), getHeight(), paint);
+                paint.setColor(0xFFFFFFFF);
+                paint.setTextSize(24);
+                canvas.drawText("No skin loaded", 50, 50, paint);
+                return;
+            }
+            
+            drawMainWindow(canvas);
+        }
+        
+        private void drawMainWindow(Canvas canvas) {
+            // Рисуем основное окно
+            Bitmap mainBg = skinBitmaps.get("main.bmp");
+            if (mainBg != null) {
+                Rect srcRect = new Rect(0, 0, mainBg.getWidth(), mainBg.getHeight());
+                Rect destRect = new Rect(0, 0, getWidth(), getHeight());
+                canvas.drawBitmap(mainBg, srcRect, destRect, paint);
+            }
+            
+            // TODO: Добавить отрисовку кнопок, текста времени и т.д.
+        }
+        
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                handleTouch(event.getX(), event.getY());
+                return true;
+            }
+            return super.onTouchEvent(event);
+        }
+        
+        private void handleTouch(float x, float y) {
+            // Переводим координаты касания в координаты оригинального скина
+            float origX = x / scaleX;
+            float origY = y / scaleY;
+            
+            // Проверяем все кнопки
+            for (Map.Entry<String, Rect> entry : buttonRegions.entrySet()) {
+                String buttonName = entry.getKey();
+                Rect region = entry.getValue();
+                
+                if (region.contains((int)origX, (int)origY)) {
+                    handleButtonClick(buttonName);
+                    break;
+                }
+            }
+        }
+        
+        private void handleButtonClick(String buttonName) {
+            if (mService == null) return;
+            
+            try {
+                switch (buttonName) {
+                    case "previous":
+                        mService.prev();
+                        break;
+                    case "play":
+                        if (!mService.isPlaying()) {
+                            mService.play();
+                        }
+                        break;
+                    case "pause":
+                        if (mService.isPlaying()) {
+                            mService.pause();
+                        }
+                        break;
+                    case "stop":
+                        mService.pause();
+                        mService.seek(0);
+                        break;
+                    case "next":
+                        mService.next();
+                        break;
+                    case "shuffle":
+                        toggleShuffle();
+                        break;
+                    case "repeat":
+                        toggleRepeat();
+                        break;
+                    // TODO: Добавить обработку volume, balance, position
+                }
+                
+                Log.d(TAG, "Button clicked: " + buttonName);
+            } catch (RemoteException e) {
+                Log.e(TAG, "RemoteException in handleButtonClick", e);
+            }
+        }
+        
+        private void toggleShuffle() {
+            try {
+                if (mService != null) {
+                    int shuffle = mService.getShuffleMode();
+                    if (shuffle == MediaPlaybackService.SHUFFLE_NONE) {
+                        mService.setShuffleMode(MediaPlaybackService.SHUFFLE_NORMAL);
+                    } else {
+                        mService.setShuffleMode(MediaPlaybackService.SHUFFLE_NONE);
+                    }
+                }
+            } catch (RemoteException e) {
+                Log.e(TAG, "Error toggling shuffle", e);
+            }
+        }
+        
+        private void toggleRepeat() {
+            try {
+                if (mService != null) {
+                    int mode = mService.getRepeatMode();
+                    if (mode == MediaPlaybackService.REPEAT_NONE) {
+                        mService.setRepeatMode(MediaPlaybackService.REPEAT_ALL);
+                    } else if (mode == MediaPlaybackService.REPEAT_ALL) {
+                        mService.setRepeatMode(MediaPlaybackService.REPEAT_CURRENT);
+                    } else {
+                        mService.setRepeatMode(MediaPlaybackService.REPEAT_NONE);
+                    }
+                }
+            } catch (RemoteException e) {
+                Log.e(TAG, "Error toggling repeat", e);
+            }
+        }
+        
+        public void updateDisplay() {
+            // Перерисовываем окно при изменении состояния
+            invalidate();
         }
     }
 }
