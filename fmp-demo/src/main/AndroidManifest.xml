@@ -76,18 +76,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".activity.VideoPlayerActivity"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-
-                <data android:scheme="file" />
-                <data android:mimeType="video/*" />
-            </intent-filter>
-        </activity>
     </application>
 
 </manifest>
