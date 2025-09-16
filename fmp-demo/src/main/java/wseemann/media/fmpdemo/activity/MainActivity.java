@@ -218,6 +218,7 @@ public class MainActivity extends FragmentActivity {
         private Paint paint;
         private float scaleX = 1.0f, scaleY = 1.0f;
         private int windowType = 0;
+        private String mSkinLoadError = null;
         
         // Размеры оригинальных окон Winamp
         private static final int MAIN_WIDTH = 275;
@@ -256,39 +257,83 @@ public class MainActivity extends FragmentActivity {
                 
                 // Создаем временную папку для извлечения
                 File tempDir = new File(getContext().getCacheDir(), "skin_temp");
+                Log.d(TAG, "Temp directory: " + tempDir.getAbsolutePath());
+                
                 if (tempDir.exists()) {
+                    Log.d(TAG, "Temp directory exists, deleting...");
                     deleteRecursive(tempDir);
                 }
-                if (!tempDir.mkdirs()) {
-                    throw new IOException("Cannot create temp directory");
-                }
                 
-                Log.d(TAG, "Extracting skin to: " + tempDir.getAbsolutePath());
+                if (!tempDir.mkdirs()) {
+                    String error = "Cannot create temp directory: " + tempDir.getAbsolutePath();
+                    Log.e(TAG, error);
+                    showError(error);
+                    return;
+                }
+                Log.d(TAG, "Temp directory created successfully");
                 
                 // Извлекаем .wsz файл из assets
-                InputStream inputStream = getContext().getAssets().open("default.wsz");
-                try (ZipInputStream zis = new ZipInputStream(inputStream)) {
-                    ZipEntry entry;
-                    byte[] buffer = new byte[1024];
-                    
-                    while ((entry = zis.getNextEntry()) != null) {
-                        if (entry.isDirectory()) continue;
-                        
-                        File outFile = new File(tempDir, entry.getName());
-                        File parentDir = outFile.getParentFile();
-                        if (parentDir != null && !parentDir.exists()) {
-                            parentDir.mkdirs();
-                        }
-                        
-                        try (FileOutputStream fos = new FileOutputStream(outFile)) {
-                            int len;
-                            while ((len = zis.read(buffer)) > 0) {
-                                fos.write(buffer, 0, len);
-                            }
-                        }
-                        
-                        Log.d(TAG, "Extracted: " + entry.getName());
+                Log.d(TAG, "Opening default.wsz from assets");
+                try {
+                    // Сначала проверим, какие файлы есть в assets
+                    String[] assetFiles = getContext().getAssets().list("");
+                    Log.d(TAG, "Files in assets:");
+                    for (String file : assetFiles) {
+                        Log.d(TAG, " - " + file);
                     }
+                    
+                    InputStream inputStream = getContext().getAssets().open("default.wsz");
+                    Log.d(TAG, "Successfully opened default.wsz from assets");
+                    
+                    try (ZipInputStream zis = new ZipInputStream(inputStream)) {
+                        ZipEntry entry;
+                        byte[] buffer = new byte[1024];
+                        int extractedFiles = 0;
+                        
+                        Log.d(TAG, "Starting ZIP extraction");
+                        while ((entry = zis.getNextEntry()) != null) {
+                            if (entry.isDirectory()) continue;
+                            
+                            File outFile = new File(tempDir, entry.getName());
+                            File parentDir = outFile.getParentFile();
+                            if (parentDir != null && !parentDir.exists()) {
+                                Log.d(TAG, "Creating parent directory: " + parentDir.getAbsolutePath());
+                                if (!parentDir.mkdirs()) {
+                                    Log.w(TAG, "Failed to create parent directory: " + parentDir.getAbsolutePath());
+                                }
+                            }
+                            
+                            Log.d(TAG, "Extracting: " + entry.getName() + " to " + outFile.getAbsolutePath());
+                            try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                                int len;
+                                while ((len = zis.read(buffer)) > 0) {
+                                    fos.write(buffer, 0, len);
+                                }
+                            }
+                            
+                            extractedFiles++;
+                            Log.d(TAG, "Extracted: " + entry.getName() + " (" + entry.getSize() + " bytes)");
+                        }
+                        
+                        Log.d(TAG, "Extraction completed. Total files: " + extractedFiles);
+                        
+                        if (extractedFiles == 0) {
+                            String error = "No files found in the skin archive";
+                            Log.e(TAG, error);
+                            showError(error);
+                            return;
+                        }
+                    } catch (IOException e) {
+                        String error = "Error extracting skin: " + e.getMessage();
+                        Log.e(TAG, error, e);
+                        showError(error);
+                        return;
+                    }
+                } catch (IOException e) {
+                    String error = "Cannot open default.wsz from assets: " + e.getMessage();
+                    Log.e(TAG, error, e);
+                    showError(error);
+                    return;
                 }
                 
                 // Загружаем bitmap'ы
@@ -297,9 +342,12 @@ public class MainActivity extends FragmentActivity {
                 // Очищаем временную папку
                 deleteRecursive(tempDir);
                 
+                Log.i(TAG, "Skin loaded successfully from assets");
+                
             } catch (Exception e) {
-                Log.e(TAG, "Error loading skin from assets", e);
-                showError("Error loading skin: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                String error = "Unexpected error loading skin: " + e.getClass().getSimpleName() + ": " + e.getMessage();
+                Log.e(TAG, error, e);
+                showError(error);
             }
         }
         
@@ -311,25 +359,53 @@ public class MainActivity extends FragmentActivity {
                 "pledit.bmp", "eqmain.bmp", "eq_ex.bmp"
             };
             
+            Log.d(TAG, "Loading bitmaps from: " + skinDir.getAbsolutePath());
+            
+            // Сначала проверим, какие файлы вообще есть в директории
+            File[] allFiles = skinDir.listFiles();
+            if (allFiles != null) {
+                Log.d(TAG, "Files in skin directory:");
+                for (File file : allFiles) {
+                    Log.d(TAG, " - " + file.getName() + " (" + file.length() + " bytes)");
+                }
+            } else {
+                Log.w(TAG, "No files found in skin directory");
+            }
+            
+            int loadedCount = 0;
             for (String name : bitmapNames) {
                 File bmpFile = new File(skinDir, name);
+                Log.d(TAG, "Looking for bitmap: " + bmpFile.getAbsolutePath());
+                
                 if (bmpFile.exists()) {
                     try {
+                        Log.d(TAG, "Found bitmap, decoding: " + name);
                         Bitmap bitmap = BitmapFactory.decodeFile(bmpFile.getAbsolutePath());
                         if (bitmap != null) {
                             skinBitmaps.put(name, bitmap);
+                            loadedCount++;
                             Log.d(TAG, "Loaded bitmap: " + name + " (" + bitmap.getWidth() + "x" + bitmap.getHeight() + ")");
+                        } else {
+                            Log.w(TAG, "Failed to decode bitmap: " + name);
                         }
                     } catch (Exception e) {
                         Log.w(TAG, "Could not load bitmap: " + name, e);
                     }
+                } else {
+                    Log.d(TAG, "Bitmap file not found: " + name);
                 }
             }
             
             // Загружаем region данные
             loadRegions(skinDir);
             
-            Log.i(TAG, "Loaded " + skinBitmaps.size() + " skin bitmaps");
+            Log.i(TAG, "Loaded " + loadedCount + " skin bitmaps");
+            
+            if (loadedCount == 0) {
+                String error = "No bitmaps were loaded from the skin";
+                Log.e(TAG, error);
+                showError(error);
+            }
             
             // Перерисовываем после загрузки
             post(this::invalidate);
@@ -437,8 +513,10 @@ public class MainActivity extends FragmentActivity {
         }
         
         private void showError(String message) {
-            Toast.makeText(getContext(), message, Toast.LENGTH_LONG).show();
+            mSkinLoadError = message;
             Log.e(TAG, message);
+            Toast.makeText(getContext(), message, Toast.LENGTH_LONG).show();
+            post(this::invalidate);
         }
         
         public void setMediaService(IMediaPlaybackService service) {
@@ -462,12 +540,22 @@ public class MainActivity extends FragmentActivity {
             
             try {
                 if (skinBitmaps.isEmpty()) {
-                    // Рисуем заглушку если скин не загружен
+                    // Рисуем заглушку если скин не загружен с информацией об ошибке
                     paint.setColor(0xFF333333);
                     canvas.drawRect(0, 0, getWidth(), getHeight(), paint);
                     paint.setColor(0xFFFFFFFF);
                     paint.setTextSize(24);
-                    canvas.drawText("No skin loaded", 50, 50, paint);
+                    
+                    String errorMessage = "No skin loaded";
+                    if (mSkinLoadError != null) {
+                        errorMessage += "\nError: " + mSkinLoadError;
+                    }
+                    
+                    // Разбиваем сообщение на строки для отображения
+                    String[] lines = errorMessage.split("\n");
+                    for (int i = 0; i < lines.length; i++) {
+                        canvas.drawText(lines[i], 50, 50 + i * 30, paint);
+                    }
                     return;
                 }
                 
