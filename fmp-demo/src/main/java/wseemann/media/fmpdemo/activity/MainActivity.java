@@ -79,6 +79,12 @@ public class MainActivity extends FragmentActivity {
             
             setVolumeControlStream(AudioManager.STREAM_MUSIC);
             
+            Log.d(TAG, "MainActivity onCreate started");
+            
+            // Создаем временный SkinWindow чтобы избежать null reference
+            mSkinWindow = new SkinWindow(this);
+            setContentView(mSkinWindow);
+            
             // Инициализируем folder picker launcher
             folderPickerLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
@@ -92,6 +98,8 @@ public class MainActivity extends FragmentActivity {
                                     skinFolderUri,
                                     Intent.FLAG_GRANT_READ_URI_PERMISSION
                                 );
+                                
+                                Log.d(TAG, "Folder selected: " + skinFolderUri);
                                 
                                 // Создаем SkinWindow после получения доступа к папке
                                 createSkinWindow();
@@ -116,17 +124,17 @@ public class MainActivity extends FragmentActivity {
     
     private void checkStorageAccess() {
         try {
+            Log.d(TAG, "Checking storage access");
             // Для Android 12 сразу запрашиваем выбор папки
             requestFolderAccess();
         } catch (Exception e) {
             showError("Error requesting folder access: " + e.getMessage());
-            // Создаем пустое окно как fallback
-            mSkinWindow = new SkinWindow(this);
-            setContentView(mSkinWindow);
+            Log.e(TAG, "Error in checkStorageAccess", e);
         }
     }
     
     private void requestFolderAccess() {
+        Log.d(TAG, "Requesting folder access");
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | 
                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
@@ -142,6 +150,7 @@ public class MainActivity extends FragmentActivity {
     
     private void createSkinWindow() {
         try {
+            Log.d(TAG, "Creating SkinWindow");
             mSkinWindow = new SkinWindow(this);
             if (skinFolderUri != null) {
                 mSkinWindow.setSkinFolderUri(skinFolderUri);
@@ -150,11 +159,15 @@ public class MainActivity extends FragmentActivity {
             // Если сервис уже подключен, передаем его в SkinWindow
             if (mService != null) {
                 mSkinWindow.setMediaService(mService);
+                Log.d(TAG, "Service already connected, setting to SkinWindow");
             }
             
             setContentView(mSkinWindow);
+            
+            Log.d(TAG, "SkinWindow created successfully");
         } catch (Exception e) {
             showError("Error creating skin window: " + e.getMessage());
+            Log.e(TAG, "Error in createSkinWindow", e);
         }
     }
     
@@ -179,6 +192,7 @@ public class MainActivity extends FragmentActivity {
     @Override
     public void onStart() {
         super.onStart();
+        Log.d(TAG, "onStart called");
         paused = false;
         
         mToken = MusicUtils.bindToService(this, osc);
@@ -194,10 +208,15 @@ public class MainActivity extends FragmentActivity {
     
     @Override
     public void onStop() {
+        Log.d(TAG, "onStop called");
         paused = true;
         mHandler.removeMessages(REFRESH);
         if (mStatusListener != null) {
-            unregisterReceiver(mStatusListener);
+            try {
+                unregisterReceiver(mStatusListener);
+            } catch (Exception e) {
+                Log.w(TAG, "Error unregistering receiver", e);
+            }
         }
         if (mToken != null) {
             MusicUtils.unbindFromService(mToken);
@@ -208,17 +227,32 @@ public class MainActivity extends FragmentActivity {
     
     private ServiceConnection osc = new ServiceConnection() {
         public void onServiceConnected(ComponentName classname, IBinder obj) {
+            Log.d(TAG, "Service connected");
             mService = IMediaPlaybackService.Stub.asInterface(obj);
-            mSkinWindow.setMediaService(mService);
+            
+            // Добавляем null check чтобы предотвратить race condition
+            if (mSkinWindow != null) {
+                mSkinWindow.setMediaService(mService);
+                Log.d(TAG, "Service set to existing SkinWindow");
+            } else {
+                Log.d(TAG, "SkinWindow is null, service will be set later");
+            }
+            // Если mSkinWindow равен null, сервис будет установлен позже в createSkinWindow()
+            
             startPlayback();
         }
+        
         public void onServiceDisconnected(ComponentName classname) {
+            Log.d(TAG, "Service disconnected");
             mService = null;
         }
     };
     
     private void startPlayback() {
-        if (mService == null) return;
+        if (mService == null) {
+            Log.w(TAG, "Cannot start playback - service is null");
+            return;
+        }
         long next = refreshNow();
         queueNextRefresh(next);
     }
@@ -232,8 +266,14 @@ public class MainActivity extends FragmentActivity {
     }
 
     private long refreshNow() {
-        if (mService == null) return 500;
-        mSkinWindow.updateDisplay();
+        if (mService == null || mSkinWindow == null) {
+            return 500;
+        }
+        try {
+            mSkinWindow.updateDisplay();
+        } catch (Exception e) {
+            Log.e(TAG, "Error updating display", e);
+        }
         return 1000; // Обновляем каждую секунду
     }
     
@@ -266,10 +306,15 @@ public class MainActivity extends FragmentActivity {
         @Override
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
-            if (action.equals(MediaPlaybackService.META_CHANGED) || 
-                action.equals(MediaPlaybackService.PLAYSTATE_CHANGED)) {
+            if (action != null && (action.equals(MediaPlaybackService.META_CHANGED) || 
+                action.equals(MediaPlaybackService.PLAYSTATE_CHANGED))) {
+                // Добавляем null check
                 if (mSkinWindow != null) {
-                    mSkinWindow.updateDisplay();
+                    try {
+                        mSkinWindow.updateDisplay();
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error updating display from broadcast", e);
+                    }
                 }
             }
         }
@@ -313,6 +358,8 @@ public class MainActivity extends FragmentActivity {
             paint.setAntiAlias(true);
             skinBitmaps = new HashMap<>();
             buttonRegions = new HashMap<>();
+            
+            Log.d(TAG, "SkinWindow initialized");
         }
         
         public void setSkinFolderUri(Uri uri) {
@@ -322,7 +369,7 @@ public class MainActivity extends FragmentActivity {
         
         private void loadSkin() {
             if (skinFolderUri == null) {
-                showError("No skin folder selected");
+                Log.w(TAG, "No skin folder selected");
                 return;
             }
             
@@ -374,26 +421,39 @@ public class MainActivity extends FragmentActivity {
             if (tempDir.exists()) {
                 deleteRecursive(tempDir);
             }
-            tempDir.mkdirs();
+            if (!tempDir.mkdirs()) {
+                throw new IOException("Cannot create temp directory");
+            }
+            
+            Log.d(TAG, "Extracting skin to: " + tempDir.getAbsolutePath());
             
             // Извлекаем .wsz (ZIP) файл
-            try (InputStream inputStream = getContext().getContentResolver().openInputStream(wszFile.getUri());
-                 ZipInputStream zis = new ZipInputStream(inputStream)) {
+            try (InputStream inputStream = getContext().getContentResolver().openInputStream(wszFile.getUri())) {
+                if (inputStream == null) {
+                    throw new IOException("Cannot open input stream for " + wszFile.getName());
+                }
                 
-                ZipEntry entry;
-                byte[] buffer = new byte[1024];
-                
-                while ((entry = zis.getNextEntry()) != null) {
-                    if (entry.isDirectory()) continue;
+                try (ZipInputStream zis = new ZipInputStream(inputStream)) {
+                    ZipEntry entry;
+                    byte[] buffer = new byte[1024];
                     
-                    File outFile = new File(tempDir, entry.getName());
-                    outFile.getParentFile().mkdirs();
-                    
-                    try (FileOutputStream fos = new FileOutputStream(outFile)) {
-                        int len;
-                        while ((len = zis.read(buffer)) > 0) {
-                            fos.write(buffer, 0, len);
+                    while ((entry = zis.getNextEntry()) != null) {
+                        if (entry.isDirectory()) continue;
+                        
+                        File outFile = new File(tempDir, entry.getName());
+                        File parentDir = outFile.getParentFile();
+                        if (parentDir != null && !parentDir.exists()) {
+                            parentDir.mkdirs();
                         }
+                        
+                        try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                            int len;
+                            while ((len = zis.read(buffer)) > 0) {
+                                fos.write(buffer, 0, len);
+                            }
+                        }
+                        
+                        Log.d(TAG, "Extracted: " + entry.getName());
                     }
                 }
             }
@@ -417,6 +477,7 @@ public class MainActivity extends FragmentActivity {
                         Bitmap bitmap = BitmapFactory.decodeFile(bmpFile.getAbsolutePath());
                         if (bitmap != null) {
                             skinBitmaps.put(name, bitmap);
+                            Log.d(TAG, "Loaded bitmap: " + name + " (" + bitmap.getWidth() + "x" + bitmap.getHeight() + ")");
                         }
                     } catch (Exception e) {
                         Log.w(TAG, "Could not load bitmap: " + name, e);
@@ -428,12 +489,18 @@ public class MainActivity extends FragmentActivity {
             loadRegions(skinDir);
             
             Log.i(TAG, "Loaded " + skinBitmaps.size() + " skin bitmaps");
+            
+            // Перерисовываем после загрузки
+            post(this::invalidate);
         }
         
         private void deleteRecursive(File fileOrDirectory) {
             if (fileOrDirectory.isDirectory()) {
-                for (File child : fileOrDirectory.listFiles()) {
-                    deleteRecursive(child);
+                File[] children = fileOrDirectory.listFiles();
+                if (children != null) {
+                    for (File child : children) {
+                        deleteRecursive(child);
+                    }
                 }
             }
             fileOrDirectory.delete();
@@ -478,28 +545,31 @@ public class MainActivity extends FragmentActivity {
             // Парсим region.txt файл
             // Формат обычно: ButtonName=x1,y1,x2,y2
             java.util.Scanner scanner = new java.util.Scanner(file);
-            while (scanner.hasNextLine()) {
-                String line = scanner.nextLine().trim();
-                if (line.isEmpty() || line.startsWith("#")) continue;
-                
-                String[] parts = line.split("=");
-                if (parts.length == 2) {
-                    String buttonName = parts[0].trim();
-                    String[] coords = parts[1].split(",");
-                    if (coords.length == 4) {
-                        try {
-                            int x1 = Integer.parseInt(coords[0].trim());
-                            int y1 = Integer.parseInt(coords[1].trim());
-                            int x2 = Integer.parseInt(coords[2].trim());
-                            int y2 = Integer.parseInt(coords[3].trim());
-                            buttonRegions.put(buttonName.toLowerCase(), new Rect(x1, y1, x2, y2));
-                        } catch (NumberFormatException e) {
-                            Log.w(TAG, "Invalid coordinates in region.txt: " + line);
+            try {
+                while (scanner.hasNextLine()) {
+                    String line = scanner.nextLine().trim();
+                    if (line.isEmpty() || line.startsWith("#")) continue;
+                    
+                    String[] parts = line.split("=");
+                    if (parts.length == 2) {
+                        String buttonName = parts[0].trim();
+                        String[] coords = parts[1].split(",");
+                        if (coords.length == 4) {
+                            try {
+                                int x1 = Integer.parseInt(coords[0].trim());
+                                int y1 = Integer.parseInt(coords[1].trim());
+                                int x2 = Integer.parseInt(coords[2].trim());
+                                int y2 = Integer.parseInt(coords[3].trim());
+                                buttonRegions.put(buttonName.toLowerCase(), new Rect(x1, y1, x2, y2));
+                            } catch (NumberFormatException e) {
+                                Log.w(TAG, "Invalid coordinates in region.txt: " + line);
+                            }
                         }
                     }
                 }
+            } finally {
+                scanner.close();
             }
-            scanner.close();
         }
         
         private void parseRgnFile(File file) throws IOException {
@@ -524,6 +594,8 @@ public class MainActivity extends FragmentActivity {
             buttonRegions.put("volume", new Rect(107, 57, 147, 68));
             buttonRegions.put("balance", new Rect(177, 57, 217, 68));
             buttonRegions.put("position", new Rect(16, 72, 248, 82));
+            
+            Log.d(TAG, "Setup default regions");
         }
         
         private void showError(String message) {
@@ -533,6 +605,7 @@ public class MainActivity extends FragmentActivity {
         
         public void setMediaService(IMediaPlaybackService service) {
             mService = service;
+            Log.d(TAG, "Media service set to SkinWindow");
             updateDisplay();
         }
         
@@ -542,6 +615,7 @@ public class MainActivity extends FragmentActivity {
             // Вычисляем масштаб для растягивания скина
             scaleX = (float) w / MAIN_WIDTH;
             scaleY = (float) h / MAIN_HEIGHT;
+            Log.d(TAG, "Size changed: " + w + "x" + h + ", scale: " + scaleX + "x" + scaleY);
             invalidate();
         }
         
@@ -549,35 +623,48 @@ public class MainActivity extends FragmentActivity {
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
             
-            if (skinBitmaps.isEmpty()) {
-                // Рисуем заглушку если скин не загружен
-                paint.setColor(0xFF333333);
-                canvas.drawRect(0, 0, getWidth(), getHeight(), paint);
-                paint.setColor(0xFFFFFFFF);
-                paint.setTextSize(24);
-                canvas.drawText("No skin loaded", 50, 50, paint);
-                return;
+            try {
+                if (skinBitmaps.isEmpty()) {
+                    // Рисуем заглушку если скин не загружен
+                    paint.setColor(0xFF333333);
+                    canvas.drawRect(0, 0, getWidth(), getHeight(), paint);
+                    paint.setColor(0xFFFFFFFF);
+                    paint.setTextSize(24);
+                    canvas.drawText("No skin loaded", 50, 50, paint);
+                    canvas.drawText("Please select a folder with Winamp skins", 50, 80, paint);
+                    return;
+                }
+                
+                drawMainWindow(canvas);
+            } catch (Exception e) {
+                Log.e(TAG, "Error in onDraw", e);
             }
-            
-            drawMainWindow(canvas);
         }
         
         private void drawMainWindow(Canvas canvas) {
-            // Рисуем основное окно
-            Bitmap mainBg = skinBitmaps.get("main.bmp");
-            if (mainBg != null) {
-                Rect srcRect = new Rect(0, 0, mainBg.getWidth(), mainBg.getHeight());
-                Rect destRect = new Rect(0, 0, getWidth(), getHeight());
-                canvas.drawBitmap(mainBg, srcRect, destRect, paint);
+            try {
+                // Рисуем основное окно
+                Bitmap mainBg = skinBitmaps.get("main.bmp");
+                if (mainBg != null) {
+                    Rect srcRect = new Rect(0, 0, mainBg.getWidth(), mainBg.getHeight());
+                    Rect destRect = new Rect(0, 0, getWidth(), getHeight());
+                    canvas.drawBitmap(mainBg, srcRect, destRect, paint);
+                }
+                
+                // TODO: Добавить отрисовку кнопок, текста времени и т.д.
+            } catch (Exception e) {
+                Log.e(TAG, "Error drawing main window", e);
             }
-            
-            // TODO: Добавить отрисовку кнопок, текста времени и т.д.
         }
         
         @Override
         public boolean onTouchEvent(MotionEvent event) {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                handleTouch(event.getX(), event.getY());
+                try {
+                    handleTouch(event.getX(), event.getY());
+                } catch (Exception e) {
+                    Log.e(TAG, "Error handling touch", e);
+                }
                 return true;
             }
             return super.onTouchEvent(event);
@@ -601,7 +688,10 @@ public class MainActivity extends FragmentActivity {
         }
         
         private void handleButtonClick(String buttonName) {
-            if (mService == null) return;
+            if (mService == null) {
+                Log.w(TAG, "Cannot handle button click - service is null");
+                return;
+            }
             
             try {
                 switch (buttonName) {
@@ -674,7 +764,11 @@ public class MainActivity extends FragmentActivity {
         
         public void updateDisplay() {
             // Перерисовываем окно при изменении состояния
-            invalidate();
+            try {
+                post(this::invalidate);
+            } catch (Exception e) {
+                Log.e(TAG, "Error updating display", e);
+            }
         }
     }
 }
