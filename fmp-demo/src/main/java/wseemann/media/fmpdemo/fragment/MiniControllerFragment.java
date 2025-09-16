@@ -18,7 +18,7 @@
 
 package wseemann.media.fmpdemo.fragment;
 
-import wseemann.media.fmpdemo.activity.MediaPlayerActivity;
+import wseemann.media.fmpdemo.activity.MainActivity;
 import wseemann.media.fmpdemo.service.IMediaPlaybackService;
 import wseemann.media.fmpdemo.service.MediaPlaybackService;
 import wseemann.media.fmpdemo.service.MusicUtils;
@@ -186,7 +186,7 @@ public class MiniControllerFragment extends Fragment implements ServiceConnectio
 					@Override
 					public void onClick(View v) {
 						Context c = v.getContext();
-						c.startActivity(new Intent(c, MediaPlayerActivity.class));
+						c.startActivity(new Intent(c, MainActivity.class));
 					}
 				});
 
