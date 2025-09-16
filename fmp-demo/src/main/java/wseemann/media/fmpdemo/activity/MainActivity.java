@@ -19,6 +19,7 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.media.AudioManager;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
@@ -33,6 +34,7 @@ import android.view.WindowManager;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 
+import androidx.documentfile.provider.DocumentFile;
 import androidx.fragment.app.FragmentActivity;
 
 import java.io.File;
@@ -48,12 +50,13 @@ import java.util.zip.ZipInputStream;
 public class MainActivity extends FragmentActivity {
     
     private static final String TAG = MainActivity.class.getName();
-    private static final String SKIN_PATH = "/storage/emulated/0/winamp_skin/";
+    private static final int REQUEST_CODE_SKIN_FOLDER = 1001;
     
     private IMediaPlaybackService mService = null;
     private ServiceToken mToken;
     private SkinWindow mSkinWindow;
     private boolean paused = false;
+    private Uri skinFolderUri;
     
     private static final int REFRESH = 1;
     private static final int QUIT = 2;
@@ -68,6 +71,24 @@ public class MainActivity extends FragmentActivity {
         // Создаем SkinWindow и устанавливаем как контент
         mSkinWindow = new SkinWindow(this);
         setContentView(mSkinWindow);
+        
+        requestSkinFolderAccess();
+    }
+    
+    private void requestSkinFolderAccess() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        startActivityForResult(intent, REQUEST_CODE_SKIN_FOLDER);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_CODE_SKIN_FOLDER && resultCode == RESULT_OK) {
+            skinFolderUri = data.getData();
+            getContentResolver().takePersistableUriPermission(skinFolderUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            mSkinWindow.setSkinFolderUri(skinFolderUri);
+        }
     }
     
     @Override
@@ -178,6 +199,7 @@ public class MainActivity extends FragmentActivity {
         private Paint paint;
         private float scaleX = 1.0f, scaleY = 1.0f;
         private int windowType = 0; // 0 = Main, 1 = Equalizer, 2 = Playlist
+        private Uri skinFolderUri;
         
         // Размеры оригинальных окон Winamp
         private static final int MAIN_WIDTH = 275;
@@ -198,45 +220,42 @@ public class MainActivity extends FragmentActivity {
             paint.setAntiAlias(true);
             skinBitmaps = new HashMap<>();
             buttonRegions = new HashMap<>();
+        }
+        
+        public void setSkinFolderUri(Uri skinFolderUri) {
+            this.skinFolderUri = skinFolderUri;
             loadSkin();
         }
-        
+
         private void loadSkin() {
-            try {
-                File skinDir = new File(SKIN_PATH);
-                if (!skinDir.exists()) {
-                    showError("Skin folder not found: " + SKIN_PATH);
-                    return;
+            if (skinFolderUri == null) return;
+            
+            DocumentFile skinDir = DocumentFile.fromTreeUri(getContext(), skinFolderUri);
+            if (skinDir == null || !skinDir.exists()) {
+                showError("Skin folder not accessible");
+                return;
+            }
+
+            // Ищем .wsz файлы
+            for (DocumentFile file : skinDir.listFiles()) {
+                if (file.getName() != null && file.getName().toLowerCase().endsWith(".wsz")) {
+                    extractAndLoadSkin(file);
+                    break;
                 }
-                
-                File[] wszFiles = skinDir.listFiles((dir, name) -> 
-                    name.toLowerCase().endsWith(".wsz"));
-                
-                if (wszFiles == null || wszFiles.length == 0) {
-                    showError("No .wsz skin files found in " + SKIN_PATH);
-                    return;
-                }
-                
-                // Берем первый найденный .wsz файл
-                File skinFile = wszFiles[0];
-                extractAndLoadSkin(skinFile);
-                
-            } catch (Exception e) {
-                Log.e(TAG, "Error loading skin", e);
-                showError("Error loading skin: " + e.getMessage());
             }
         }
-        
-        private void extractAndLoadSkin(File wszFile) throws IOException {
+
+        private void extractAndLoadSkin(DocumentFile wszFile) {
             // Создаем временную папку для извлечения
             File tempDir = new File(getContext().getCacheDir(), "skin_temp");
             if (tempDir.exists()) {
                 deleteRecursive(tempDir);
             }
             tempDir.mkdirs();
-            
-            // Извлекаем .wsz (ZIP) файл
-            try (ZipInputStream zis = new ZipInputStream(new FileInputStream(wszFile))) {
+
+            try (InputStream inputStream = getContext().getContentResolver().openInputStream(wszFile.getUri());
+                 ZipInputStream zis = new ZipInputStream(inputStream)) {
+                
                 ZipEntry entry;
                 byte[] buffer = new byte[1024];
                 
@@ -253,10 +272,13 @@ public class MainActivity extends FragmentActivity {
                         }
                     }
                 }
+                
+                // Загружаем bitmap'ы
+                loadBitmaps(tempDir);
+            } catch (IOException e) {
+                Log.e(TAG, "Error extracting skin", e);
+                showError("Error extracting skin: " + e.getMessage());
             }
-            
-            // Загружаем bitmap'ы
-            loadBitmaps(tempDir);
         }
         
         private void loadBitmaps(File skinDir) {
@@ -285,6 +307,7 @@ public class MainActivity extends FragmentActivity {
             loadRegions(skinDir);
             
             Log.i(TAG, "Loaded " + skinBitmaps.size() + " skin bitmaps");
+            invalidate();
         }
         
         private void deleteRecursive(File fileOrDirectory) {
