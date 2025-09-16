@@ -5,6 +5,7 @@ import wseemann.media.fmpdemo.service.IMediaPlaybackService;
 import wseemann.media.fmpdemo.service.MediaPlaybackService;
 import wseemann.media.fmpdemo.service.MusicUtils;
 import wseemann.media.fmpdemo.service.MusicUtils.ServiceToken;
+import android.Manifest;
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
@@ -13,6 +14,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -20,12 +22,14 @@ import android.graphics.Paint;
 import android.graphics.Rect;
 import android.media.AudioManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
 import android.os.RemoteException;
+import android.provider.DocumentsContract;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.MotionEvent;
@@ -34,6 +38,10 @@ import android.view.WindowManager;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.documentfile.provider.DocumentFile;
 import androidx.fragment.app.FragmentActivity;
 
@@ -50,16 +58,18 @@ import java.util.zip.ZipInputStream;
 public class MainActivity extends FragmentActivity {
     
     private static final String TAG = MainActivity.class.getName();
-    private static final int REQUEST_CODE_SKIN_FOLDER = 1001;
+    private static final int PERMISSION_REQUEST_CODE = 100;
     
     private IMediaPlaybackService mService = null;
     private ServiceToken mToken;
     private SkinWindow mSkinWindow;
     private boolean paused = false;
-    private Uri skinFolderUri;
+    private Uri skinFolderUri = null;
     
     private static final int REFRESH = 1;
     private static final int QUIT = 2;
+    
+    private ActivityResultLauncher<Intent> folderPickerLauncher;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -68,27 +78,88 @@ public class MainActivity extends FragmentActivity {
         
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
         
-        // Создаем SkinWindow и устанавливаем как контент
-        mSkinWindow = new SkinWindow(this);
-        setContentView(mSkinWindow);
+        // Инициализируем folder picker launcher
+        folderPickerLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                    skinFolderUri = result.getData().getData();
+                    if (skinFolderUri != null) {
+                        // Сохраняем persistable permission
+                        getContentResolver().takePersistableUriPermission(
+                            skinFolderUri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        );
+                        
+                        // Создаем SkinWindow после получения доступа к папке
+                        createSkinWindow();
+                    }
+                }
+            }
+        );
         
-        requestSkinFolderAccess();
+        // Проверяем доступ к папке или запрашиваем его
+        checkStorageAccess();
     }
     
-    private void requestSkinFolderAccess() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        startActivityForResult(intent, REQUEST_CODE_SKIN_FOLDER);
+    private void checkStorageAccess() {
+        // Проверяем, есть ли сохраненный URI папки
+        // В реальном приложении это можно сохранять в SharedPreferences
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+ - используем Storage Access Framework
+            requestFolderAccess();
+        } else {
+            // Для старых версий Android проверяем обычные разрешения
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) 
+                != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, 
+                    new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, 
+                    PERMISSION_REQUEST_CODE);
+            } else {
+                createSkinWindow();
+            }
+        }
     }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_CODE_SKIN_FOLDER && resultCode == RESULT_OK) {
-            skinFolderUri = data.getData();
-            getContentResolver().takePersistableUriPermission(skinFolderUri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION);
+    
+    private void requestFolderAccess() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | 
+                       Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        
+        // Пытаемся открыть папку winamp_skin если она существует
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Uri initialUri = Uri.parse("content://com.android.externalstorage.documents/tree/primary%3Awinamp_skin");
+            intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri);
+        }
+        
+        folderPickerLauncher.launch(intent);
+    }
+    
+    private void createSkinWindow() {
+        mSkinWindow = new SkinWindow(this);
+        if (skinFolderUri != null) {
             mSkinWindow.setSkinFolderUri(skinFolderUri);
         }
+        setContentView(mSkinWindow);
+    }
+    
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                createSkinWindow();
+            } else {
+                showError("Storage permission required to load skins");
+                finish();
+            }
+        }
+    }
+    
+    private void showError(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        Log.e(TAG, message);
     }
     
     @Override
@@ -222,37 +293,57 @@ public class MainActivity extends FragmentActivity {
             buttonRegions = new HashMap<>();
         }
         
-        public void setSkinFolderUri(Uri skinFolderUri) {
-            this.skinFolderUri = skinFolderUri;
+        public void setSkinFolderUri(Uri uri) {
+            skinFolderUri = uri;
             loadSkin();
         }
-
+        
         private void loadSkin() {
-            if (skinFolderUri == null) return;
-            
-            DocumentFile skinDir = DocumentFile.fromTreeUri(getContext(), skinFolderUri);
-            if (skinDir == null || !skinDir.exists()) {
-                showError("Skin folder not accessible");
+            if (skinFolderUri == null) {
+                showError("No skin folder selected");
                 return;
             }
-
-            // Ищем .wsz файлы
-            for (DocumentFile file : skinDir.listFiles()) {
-                if (file.getName() != null && file.getName().toLowerCase().endsWith(".wsz")) {
-                    extractAndLoadSkin(file);
-                    break;
+            
+            try {
+                DocumentFile skinDir = DocumentFile.fromTreeUri(getContext(), skinFolderUri);
+                if (skinDir == null || !skinDir.exists()) {
+                    showError("Skin folder not accessible");
+                    return;
                 }
+                
+                // Ищем .wsz файлы
+                DocumentFile[] files = skinDir.listFiles();
+                DocumentFile wszFile = null;
+                
+                for (DocumentFile file : files) {
+                    if (file.getName() != null && file.getName().toLowerCase().endsWith(".wsz")) {
+                        wszFile = file;
+                        break;
+                    }
+                }
+                
+                if (wszFile == null) {
+                    showError("No .wsz skin files found in selected folder");
+                    return;
+                }
+                
+                extractAndLoadSkin(wszFile);
+                
+            } catch (Exception e) {
+                Log.e(TAG, "Error loading skin", e);
+                showError("Error loading skin: " + e.getMessage());
             }
         }
-
-        private void extractAndLoadSkin(DocumentFile wszFile) {
+        
+        private void extractAndLoadSkin(DocumentFile wszFile) throws IOException {
             // Создаем временную папку для извлечения
             File tempDir = new File(getContext().getCacheDir(), "skin_temp");
             if (tempDir.exists()) {
                 deleteRecursive(tempDir);
             }
             tempDir.mkdirs();
-
+            
+            // Извлекаем .wsz (ZIP) файл
             try (InputStream inputStream = getContext().getContentResolver().openInputStream(wszFile.getUri());
                  ZipInputStream zis = new ZipInputStream(inputStream)) {
                 
@@ -272,13 +363,10 @@ public class MainActivity extends FragmentActivity {
                         }
                     }
                 }
-                
-                // Загружаем bitmap'ы
-                loadBitmaps(tempDir);
-            } catch (IOException e) {
-                Log.e(TAG, "Error extracting skin", e);
-                showError("Error extracting skin: " + e.getMessage());
             }
+            
+            // Загружаем bitmap'ы
+            loadBitmaps(tempDir);
         }
         
         private void loadBitmaps(File skinDir) {
@@ -307,7 +395,6 @@ public class MainActivity extends FragmentActivity {
             loadRegions(skinDir);
             
             Log.i(TAG, "Loaded " + skinBitmaps.size() + " skin bitmaps");
-            invalidate();
         }
         
         private void deleteRecursive(File fileOrDirectory) {
