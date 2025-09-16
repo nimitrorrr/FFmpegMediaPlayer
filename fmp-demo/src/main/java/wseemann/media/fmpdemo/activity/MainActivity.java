@@ -351,66 +351,66 @@ public class MainActivity extends FragmentActivity {
             }
         }
         
-        private void loadBitmaps(File skinDir) {
-            String[] bitmapNames = {
-                "main.bmp", "cbuttons.bmp", "titlebar.bmp", 
-                "text.bmp", "numbers.bmp", "volume.bmp", 
-                "balance.bmp", "monoster.bmp", "playpaus.bmp",
-                "pledit.bmp", "eqmain.bmp", "eq_ex.bmp"
-            };
+    private void loadBitmaps(File skinDir) {
+        // Создаем map всех файлов в директории без учета регистра
+        Map<String, File> allFilesMap = new HashMap<>();
+        File[] allFiles = skinDir.listFiles();
+        if (allFiles != null) {
+            for (File file : allFiles) {
+                allFilesMap.put(file.getName().toLowerCase(), file);
+            }
+        }
+    
+        // Список битмапов, которые мы ищем (в нижнем регистре для сравнения)
+        String[] bitmapNames = {
+            "main.bmp", "cbuttons.bmp", "titlebar.bmp", 
+            "text.bmp", "numbers.bmp", "volume.bmp", 
+            "balance.bmp", "monoster.bmp", "playpaus.bmp",
+            "pledit.bmp", "eqmain.bmp", "eq_ex.bmp"
+        };
+        
+        Log.d(TAG, "Loading bitmaps from: " + skinDir.getAbsolutePath());
+        
+        int loadedCount = 0;
+        for (String name : bitmapNames) {
+            // Ищем файл без учета регистра
+            File bmpFile = allFilesMap.get(name.toLowerCase());
             
-            Log.d(TAG, "Loading bitmaps from: " + skinDir.getAbsolutePath());
-            
-            // Сначала проверим, какие файлы вообще есть в директории
-            File[] allFiles = skinDir.listFiles();
-            if (allFiles != null) {
-                Log.d(TAG, "Files in skin directory:");
-                for (File file : allFiles) {
-                    Log.d(TAG, " - " + file.getName() + " (" + file.length() + " bytes)");
+            if (bmpFile != null && bmpFile.exists()) {
+                try {
+                    Log.d(TAG, "Found bitmap, decoding: " + bmpFile.getName());
+                    Bitmap bitmap = BitmapFactory.decodeFile(bmpFile.getAbsolutePath());
+                    if (bitmap != null) {
+                        // Сохраняем с оригинальным именем (в нижнем регистре для consistency)
+                        skinBitmaps.put(name, bitmap);
+                        loadedCount++;
+                        Log.d(TAG, "Loaded bitmap: " + name + " (" + bitmap.getWidth() + "x" + bitmap.getHeight() + ")");
+                    } else {
+                        Log.w(TAG, "Failed to decode bitmap: " + name);
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "Could not load bitmap: " + name, e);
                 }
             } else {
-                Log.w(TAG, "No files found in skin directory");
+                Log.d(TAG, "Bitmap file not found: " + name);
             }
-            
-            int loadedCount = 0;
-            for (String name : bitmapNames) {
-                File bmpFile = new File(skinDir, name);
-                Log.d(TAG, "Looking for bitmap: " + bmpFile.getAbsolutePath());
-                
-                if (bmpFile.exists()) {
-                    try {
-                        Log.d(TAG, "Found bitmap, decoding: " + name);
-                        Bitmap bitmap = BitmapFactory.decodeFile(bmpFile.getAbsolutePath());
-                        if (bitmap != null) {
-                            skinBitmaps.put(name, bitmap);
-                            loadedCount++;
-                            Log.d(TAG, "Loaded bitmap: " + name + " (" + bitmap.getWidth() + "x" + bitmap.getHeight() + ")");
-                        } else {
-                            Log.w(TAG, "Failed to decode bitmap: " + name);
-                        }
-                    } catch (Exception e) {
-                        Log.w(TAG, "Could not load bitmap: " + name, e);
-                    }
-                } else {
-                    Log.d(TAG, "Bitmap file not found: " + name);
-                }
-            }
-            
-            // Загружаем region данные
-            loadRegions(skinDir);
-            
-            Log.i(TAG, "Loaded " + loadedCount + " skin bitmaps");
-            
-            if (loadedCount == 0) {
-                String error = "No bitmaps were loaded from the skin";
-                Log.e(TAG, error);
-                showError(error);
-            }
-            
-            // Перерисовываем после загрузки
-            post(this::invalidate);
         }
-        
+    
+    // Загружаем region данные
+    loadRegions(skinDir);
+    
+    Log.i(TAG, "Loaded " + loadedCount + " skin bitmaps");
+    
+    if (loadedCount == 0) {
+        String error = "No bitmaps were loaded from the skin";
+        Log.e(TAG, error);
+        showError(error);
+    }
+    
+    // Перерисовываем после загрузки
+    post(this::invalidate);
+}
+
         private void deleteRecursive(File fileOrDirectory) {
             if (fileOrDirectory.isDirectory()) {
                 File[] children = fileOrDirectory.listFiles();
@@ -423,28 +423,38 @@ public class MainActivity extends FragmentActivity {
             fileOrDirectory.delete();
         }
         
-        private void loadRegions(File skinDir) {
-            // Ищем файлы с region данными
-            File[] regionFiles = {
-                new File(skinDir, "region.txt"),
-                new File(skinDir, "main.rgn"),
-                new File(skinDir, "pledit.rgn"),
-                new File(skinDir, "eqmain.rgn")
-            };
-            
-            for (File regionFile : regionFiles) {
-                if (regionFile.exists()) {
-                    parseRegionFile(regionFile);
-                }
-            }
-            
-            // Если region файлы не найдены, используем стандартные координаты
-            if (buttonRegions.isEmpty()) {
-                setupDefaultRegions();
-            }
-            
-            Log.i(TAG, "Loaded " + buttonRegions.size() + " button regions");
+private void loadRegions(File skinDir) {
+    // Создаем map всех файлов в директории без учета регистра
+    Map<String, File> allFilesMap = new HashMap<>();
+    File[] allFiles = skinDir.listFiles();
+    if (allFiles != null) {
+        for (File file : allFiles) {
+            allFilesMap.put(file.getName().toLowerCase(), file);
         }
+    }
+
+        // Ищем файлы с region данными без учета регистра
+        String[] regionFileNames = {
+            "region.txt",
+            "main.rgn",
+            "pledit.rgn", 
+            "eqmain.rgn"
+        };
+        
+        for (String fileName : regionFileNames) {
+            File regionFile = allFilesMap.get(fileName.toLowerCase());
+            if (regionFile != null && regionFile.exists()) {
+                parseRegionFile(regionFile);
+            }
+        }
+        
+        // Если region файлы не найдены, используем стандартные координаты
+        if (buttonRegions.isEmpty()) {
+            setupDefaultRegions();
+        }
+        
+        Log.i(TAG, "Loaded " + buttonRegions.size() + " button regions");
+    }
         
         private void parseRegionFile(File regionFile) {
             try {
