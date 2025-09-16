@@ -87,7 +87,13 @@ public class MediaPlayerHelper implements
 
     public void seekTo(long position) {
         if (mMediaPlayer != null) {
-            mMediaPlayer.seekTo(position);
+                if (position > Integer.MAX_VALUE) {
+                        mMediaPlayer.seekTo(Integer.MAX_VALUE);
+                } else if (position < 0) {
+                        mMediaPlayer.seekTo(0);
+                } else {
+                        mMediaPlayer.seekTo((int) position);
+                }
         }
     }
 
