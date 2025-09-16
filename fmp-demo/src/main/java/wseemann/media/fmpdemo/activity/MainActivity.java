@@ -73,52 +73,56 @@ public class MainActivity extends FragmentActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        super.onCreate(savedInstanceState);
-        
-        setVolumeControlStream(AudioManager.STREAM_MUSIC);
-        
-        // Инициализируем folder picker launcher
-        folderPickerLauncher = registerForActivityResult(
-            new ActivityResultContracts.StartActivityForResult(),
-            result -> {
-                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
-                    skinFolderUri = result.getData().getData();
-                    if (skinFolderUri != null) {
-                        // Сохраняем persistable permission
-                        getContentResolver().takePersistableUriPermission(
-                            skinFolderUri,
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION
-                        );
-                        
-                        // Создаем SkinWindow после получения доступа к папке
-                        createSkinWindow();
+        try {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            super.onCreate(savedInstanceState);
+            
+            setVolumeControlStream(AudioManager.STREAM_MUSIC);
+            
+            // Инициализируем folder picker launcher
+            folderPickerLauncher = registerForActivityResult(
+                new ActivityResultContracts.StartActivityForResult(),
+                result -> {
+                    try {
+                        if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                            skinFolderUri = result.getData().getData();
+                            if (skinFolderUri != null) {
+                                // Сохраняем persistable permission
+                                getContentResolver().takePersistableUriPermission(
+                                    skinFolderUri,
+                                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                );
+                                
+                                // Создаем SkinWindow после получения доступа к папке
+                                createSkinWindow();
+                            }
+                        } else {
+                            showError("No folder selected");
+                        }
+                    } catch (Exception e) {
+                        showError("Error processing folder selection: " + e.getMessage());
                     }
                 }
-            }
-        );
-        
-        // Проверяем доступ к папке или запрашиваем его
-        checkStorageAccess();
+            );
+            
+            // Проверяем доступ к папке или запрашиваем его
+            checkStorageAccess();
+            
+        } catch (Exception e) {
+            showError("Error in onCreate: " + e.getMessage());
+            finish();
+        }
     }
     
     private void checkStorageAccess() {
-        // Проверяем, есть ли сохраненный URI папки
-        // В реальном приложении это можно сохранять в SharedPreferences
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11+ - используем Storage Access Framework
+        try {
+            // Для Android 12 сразу запрашиваем выбор папки
             requestFolderAccess();
-        } else {
-            // Для старых версий Android проверяем обычные разрешения
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) 
-                != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this, 
-                    new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, 
-                    PERMISSION_REQUEST_CODE);
-            } else {
-                createSkinWindow();
-            }
+        } catch (Exception e) {
+            showError("Error requesting folder access: " + e.getMessage());
+            // Создаем пустое окно как fallback
+            mSkinWindow = new SkinWindow(this);
+            setContentView(mSkinWindow);
         }
     }
     
@@ -137,11 +141,15 @@ public class MainActivity extends FragmentActivity {
     }
     
     private void createSkinWindow() {
-        mSkinWindow = new SkinWindow(this);
-        if (skinFolderUri != null) {
-            mSkinWindow.setSkinFolderUri(skinFolderUri);
+        try {
+            mSkinWindow = new SkinWindow(this);
+            if (skinFolderUri != null) {
+                mSkinWindow.setSkinFolderUri(skinFolderUri);
+            }
+            setContentView(mSkinWindow);
+        } catch (Exception e) {
+            showError("Error creating skin window: " + e.getMessage());
         }
-        setContentView(mSkinWindow);
     }
     
     @Override
@@ -278,12 +286,20 @@ public class MainActivity extends FragmentActivity {
         
         public SkinWindow(Context context) {
             super(context);
-            init();
+            try {
+                init();
+            } catch (Exception e) {
+                Log.e(TAG, "Error in SkinWindow constructor", e);
+            }
         }
         
         public SkinWindow(Context context, AttributeSet attrs) {
             super(context, attrs);
-            init();
+            try {
+                init();
+            } catch (Exception e) {
+                Log.e(TAG, "Error in SkinWindow constructor", e);
+            }
         }
         
         private void init() {
@@ -305,19 +321,30 @@ public class MainActivity extends FragmentActivity {
             }
             
             try {
+                Log.d(TAG, "Loading skin from URI: " + skinFolderUri);
+                
                 DocumentFile skinDir = DocumentFile.fromTreeUri(getContext(), skinFolderUri);
                 if (skinDir == null || !skinDir.exists()) {
                     showError("Skin folder not accessible");
                     return;
                 }
                 
+                Log.d(TAG, "Skin folder accessible: " + skinDir.getName());
+                
                 // Ищем .wsz файлы
                 DocumentFile[] files = skinDir.listFiles();
-                DocumentFile wszFile = null;
+                if (files == null) {
+                    showError("Cannot read files from selected folder");
+                    return;
+                }
                 
+                Log.d(TAG, "Found " + files.length + " files in folder");
+                
+                DocumentFile wszFile = null;
                 for (DocumentFile file : files) {
-                    if (file.getName() != null && file.getName().toLowerCase().endsWith(".wsz")) {
+                    if (file != null && file.getName() != null && file.getName().toLowerCase().endsWith(".wsz")) {
                         wszFile = file;
+                        Log.d(TAG, "Found .wsz file: " + file.getName());
                         break;
                     }
                 }
@@ -331,7 +358,7 @@ public class MainActivity extends FragmentActivity {
                 
             } catch (Exception e) {
                 Log.e(TAG, "Error loading skin", e);
-                showError("Error loading skin: " + e.getMessage());
+                showError("Error loading skin: " + e.getClass().getSimpleName() + ": " + e.getMessage());
             }
         }
         
