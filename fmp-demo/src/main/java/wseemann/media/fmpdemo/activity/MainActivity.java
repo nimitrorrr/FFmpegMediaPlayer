@@ -5,7 +5,6 @@ import wseemann.media.fmpdemo.service.IMediaPlaybackService;
 import wseemann.media.fmpdemo.service.MediaPlaybackService;
 import wseemann.media.fmpdemo.service.MusicUtils;
 import wseemann.media.fmpdemo.service.MusicUtils.ServiceToken;
-import android.Manifest;
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
@@ -14,39 +13,27 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
-import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.media.AudioManager;
-import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
 import android.os.RemoteException;
-import android.provider.DocumentsContract;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.LinearLayout;
 import android.widget.Toast;
 
-import androidx.activity.result.ActivityResultLauncher;
-import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
-import androidx.documentfile.provider.DocumentFile;
 import androidx.fragment.app.FragmentActivity;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -58,19 +45,15 @@ import java.util.zip.ZipInputStream;
 public class MainActivity extends FragmentActivity {
     
     private static final String TAG = MainActivity.class.getName();
-    private static final int PERMISSION_REQUEST_CODE = 100;
     
     private IMediaPlaybackService mService = null;
     private ServiceToken mToken;
     private SkinWindow mSkinWindow;
     private boolean paused = false;
-    private Uri skinFolderUri = null;
     
     private static final int REFRESH = 1;
     private static final int QUIT = 2;
     
-    private ActivityResultLauncher<Intent> folderPickerLauncher;
-
     @Override
     public void onCreate(Bundle savedInstanceState) {
         try {
@@ -81,106 +64,17 @@ public class MainActivity extends FragmentActivity {
             
             Log.d(TAG, "MainActivity onCreate started");
             
-            // Создаем временный SkinWindow чтобы избежать null reference
+            // Создаем SkinWindow
             mSkinWindow = new SkinWindow(this);
             setContentView(mSkinWindow);
             
-            // Инициализируем folder picker launcher
-            folderPickerLauncher = registerForActivityResult(
-                new ActivityResultContracts.StartActivityForResult(),
-                result -> {
-                    try {
-                        if (result.getResultCode() == RESULT_OK && result.getData() != null) {
-                            skinFolderUri = result.getData().getData();
-                            if (skinFolderUri != null) {
-                                // Сохраняем persistable permission
-                                getContentResolver().takePersistableUriPermission(
-                                    skinFolderUri,
-                                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                                );
-                                
-                                Log.d(TAG, "Folder selected: " + skinFolderUri);
-                                
-                                // Создаем SkinWindow после получения доступа к папке
-                                createSkinWindow();
-                            }
-                        } else {
-                            showError("No folder selected");
-                        }
-                    } catch (Exception e) {
-                        showError("Error processing folder selection: " + e.getMessage());
-                    }
-                }
-            );
-            
-            // Проверяем доступ к папке или запрашиваем его
-            checkStorageAccess();
-            
-        } catch (Exception e) {
-            showError("Error in onCreate: " + e.getMessage());
-            finish();
-        }
-    }
-    
-    private void checkStorageAccess() {
-        try {
-            Log.d(TAG, "Checking storage access");
-            // Для Android 12 сразу запрашиваем выбор папки
-            requestFolderAccess();
-        } catch (Exception e) {
-            showError("Error requesting folder access: " + e.getMessage());
-            Log.e(TAG, "Error in checkStorageAccess", e);
-        }
-    }
-    
-    private void requestFolderAccess() {
-        Log.d(TAG, "Requesting folder access");
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | 
-                       Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-        
-        // Пытаемся открыть папку winamp_skin если она существует
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Uri initialUri = Uri.parse("content://com.android.externalstorage.documents/tree/primary%3Awinamp_skin");
-            intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri);
-        }
-        
-        folderPickerLauncher.launch(intent);
-    }
-    
-    private void createSkinWindow() {
-        try {
-            Log.d(TAG, "Creating SkinWindow");
-            mSkinWindow = new SkinWindow(this);
-            if (skinFolderUri != null) {
-                mSkinWindow.setSkinFolderUri(skinFolderUri);
-            }
-            
-            // Если сервис уже подключен, передаем его в SkinWindow
-            if (mService != null) {
-                mSkinWindow.setMediaService(mService);
-                Log.d(TAG, "Service already connected, setting to SkinWindow");
-            }
-            
-            setContentView(mSkinWindow);
+            // Загружаем скин из ресурсов
+            mSkinWindow.loadSkinFromAssets();
             
             Log.d(TAG, "SkinWindow created successfully");
         } catch (Exception e) {
-            showError("Error creating skin window: " + e.getMessage());
-            Log.e(TAG, "Error in createSkinWindow", e);
-        }
-    }
-    
-    @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == PERMISSION_REQUEST_CODE) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                createSkinWindow();
-            } else {
-                showError("Storage permission required to load skins");
-                finish();
-            }
+            showError("Error in onCreate: " + e.getMessage());
+            finish();
         }
     }
     
@@ -230,14 +124,10 @@ public class MainActivity extends FragmentActivity {
             Log.d(TAG, "Service connected");
             mService = IMediaPlaybackService.Stub.asInterface(obj);
             
-            // Добавляем null check чтобы предотвратить race condition
             if (mSkinWindow != null) {
                 mSkinWindow.setMediaService(mService);
                 Log.d(TAG, "Service set to existing SkinWindow");
-            } else {
-                Log.d(TAG, "SkinWindow is null, service will be set later");
             }
-            // Если mSkinWindow равен null, сервис будет установлен позже в createSkinWindow()
             
             startPlayback();
         }
@@ -274,7 +164,7 @@ public class MainActivity extends FragmentActivity {
         } catch (Exception e) {
             Log.e(TAG, "Error updating display", e);
         }
-        return 1000; // Обновляем каждую секунду
+        return 1000;
     }
     
     private final Handler mHandler = new Handler() {
@@ -308,7 +198,6 @@ public class MainActivity extends FragmentActivity {
             String action = intent.getAction();
             if (action != null && (action.equals(MediaPlaybackService.META_CHANGED) || 
                 action.equals(MediaPlaybackService.PLAYSTATE_CHANGED))) {
-                // Добавляем null check
                 if (mSkinWindow != null) {
                     try {
                         mSkinWindow.updateDisplay();
@@ -328,8 +217,7 @@ public class MainActivity extends FragmentActivity {
         private IMediaPlaybackService mService;
         private Paint paint;
         private float scaleX = 1.0f, scaleY = 1.0f;
-        private int windowType = 0; // 0 = Main, 1 = Equalizer, 2 = Playlist
-        private Uri skinFolderUri;
+        private int windowType = 0;
         
         // Размеры оригинальных окон Winamp
         private static final int MAIN_WIDTH = 275;
@@ -362,77 +250,23 @@ public class MainActivity extends FragmentActivity {
             Log.d(TAG, "SkinWindow initialized");
         }
         
-        public void setSkinFolderUri(Uri uri) {
-            skinFolderUri = uri;
-            loadSkin();
-        }
-        
-        private void loadSkin() {
-            if (skinFolderUri == null) {
-                Log.w(TAG, "No skin folder selected");
-                return;
-            }
-            
+        public void loadSkinFromAssets() {
             try {
-                Log.d(TAG, "Loading skin from URI: " + skinFolderUri);
+                Log.d(TAG, "Loading skin from assets");
                 
-                DocumentFile skinDir = DocumentFile.fromTreeUri(getContext(), skinFolderUri);
-                if (skinDir == null || !skinDir.exists()) {
-                    showError("Skin folder not accessible");
-                    return;
+                // Создаем временную папку для извлечения
+                File tempDir = new File(getContext().getCacheDir(), "skin_temp");
+                if (tempDir.exists()) {
+                    deleteRecursive(tempDir);
+                }
+                if (!tempDir.mkdirs()) {
+                    throw new IOException("Cannot create temp directory");
                 }
                 
-                Log.d(TAG, "Skin folder accessible: " + skinDir.getName());
+                Log.d(TAG, "Extracting skin to: " + tempDir.getAbsolutePath());
                 
-                // Ищем .wsz файлы
-                DocumentFile[] files = skinDir.listFiles();
-                if (files == null) {
-                    showError("Cannot read files from selected folder");
-                    return;
-                }
-                
-                Log.d(TAG, "Found " + files.length + " files in folder");
-                
-                DocumentFile wszFile = null;
-                for (DocumentFile file : files) {
-                    if (file != null && file.getName() != null && file.getName().toLowerCase().endsWith(".wsz")) {
-                        wszFile = file;
-                        Log.d(TAG, "Found .wsz file: " + file.getName());
-                        break;
-                    }
-                }
-                
-                if (wszFile == null) {
-                    showError("No .wsz skin files found in selected folder");
-                    return;
-                }
-                
-                extractAndLoadSkin(wszFile);
-                
-            } catch (Exception e) {
-                Log.e(TAG, "Error loading skin", e);
-                showError("Error loading skin: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-            }
-        }
-        
-        private void extractAndLoadSkin(DocumentFile wszFile) throws IOException {
-            // Создаем временную папку для извлечения
-            File tempDir = new File(getContext().getCacheDir(), "skin_temp");
-            if (tempDir.exists()) {
-                deleteRecursive(tempDir);
-            }
-            if (!tempDir.mkdirs()) {
-                throw new IOException("Cannot create temp directory");
-            }
-            
-            Log.d(TAG, "Extracting skin to: " + tempDir.getAbsolutePath());
-            
-            // Извлекаем .wsz (ZIP) файл
-            try (InputStream inputStream = getContext().getContentResolver().openInputStream(wszFile.getUri())) {
-                if (inputStream == null) {
-                    throw new IOException("Cannot open input stream for " + wszFile.getName());
-                }
-                
+                // Извлекаем .wsz файл из assets
+                InputStream inputStream = getContext().getAssets().open("default.wsz");
                 try (ZipInputStream zis = new ZipInputStream(inputStream)) {
                     ZipEntry entry;
                     byte[] buffer = new byte[1024];
@@ -456,10 +290,17 @@ public class MainActivity extends FragmentActivity {
                         Log.d(TAG, "Extracted: " + entry.getName());
                     }
                 }
+                
+                // Загружаем bitmap'ы
+                loadBitmaps(tempDir);
+                
+                // Очищаем временную папку
+                deleteRecursive(tempDir);
+                
+            } catch (Exception e) {
+                Log.e(TAG, "Error loading skin from assets", e);
+                showError("Error loading skin: " + e.getClass().getSimpleName() + ": " + e.getMessage());
             }
-            
-            // Загружаем bitmap'ы
-            loadBitmaps(tempDir);
         }
         
         private void loadBitmaps(File skinDir) {
@@ -543,7 +384,6 @@ public class MainActivity extends FragmentActivity {
         
         private void parseRegionTxt(File file) throws IOException {
             // Парсим region.txt файл
-            // Формат обычно: ButtonName=x1,y1,x2,y2
             java.util.Scanner scanner = new java.util.Scanner(file);
             try {
                 while (scanner.hasNextLine()) {
@@ -573,9 +413,7 @@ public class MainActivity extends FragmentActivity {
         }
         
         private void parseRgnFile(File file) throws IOException {
-            // Парсим .rgn файл (бинарный формат)
-            // Для простоты пока используем стандартные координаты
-            // TODO: Реализовать полный парсинг .rgn формата
+            // Для простоты используем стандартные координаты
             setupDefaultRegions();
         }
         
@@ -612,7 +450,6 @@ public class MainActivity extends FragmentActivity {
         @Override
         protected void onSizeChanged(int w, int h, int oldw, int oldh) {
             super.onSizeChanged(w, h, oldw, oldh);
-            // Вычисляем масштаб для растягивания скина
             scaleX = (float) w / MAIN_WIDTH;
             scaleY = (float) h / MAIN_HEIGHT;
             Log.d(TAG, "Size changed: " + w + "x" + h + ", scale: " + scaleX + "x" + scaleY);
@@ -631,7 +468,6 @@ public class MainActivity extends FragmentActivity {
                     paint.setColor(0xFFFFFFFF);
                     paint.setTextSize(24);
                     canvas.drawText("No skin loaded", 50, 50, paint);
-                    canvas.drawText("Please select a folder with Winamp skins", 50, 80, paint);
                     return;
                 }
                 
@@ -721,7 +557,6 @@ public class MainActivity extends FragmentActivity {
                     case "repeat":
                         toggleRepeat();
                         break;
-                    // TODO: Добавить обработку volume, balance, position
                 }
                 
                 Log.d(TAG, "Button clicked: " + buttonName);
