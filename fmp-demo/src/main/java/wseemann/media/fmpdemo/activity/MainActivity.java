@@ -146,6 +146,12 @@ public class MainActivity extends FragmentActivity {
             if (skinFolderUri != null) {
                 mSkinWindow.setSkinFolderUri(skinFolderUri);
             }
+            
+            // Если сервис уже подключен, передаем его в SkinWindow
+            if (mService != null) {
+                mSkinWindow.setMediaService(mService);
+            }
+            
             setContentView(mSkinWindow);
         } catch (Exception e) {
             showError("Error creating skin window: " + e.getMessage());
