@@ -1,58 +1,82 @@
 name: Build FFmpegMediaPlayer APK
-
 on:
   push:
     branches:
       - master
   pull_request:
 
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2 -Dorg.gradle.parallel=true
+  GRADLE_USER_HOME: ${{ github.workspace }}/.gradle
+
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
-
+      uses: actions/checkout@v4
+      
     - name: Setup Java 17
-      uses: actions/setup-java@v3
+      uses: actions/setup-java@v4
       with:
         distribution: temurin
         java-version: 17
-
+        
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
-
-    - name: Generate local.properties
-      run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-
-    - name: Make gradlew executable
-      run: chmod +x ./gradlew
+      with:
+        api-level: 34
+        build-tools: 34.0.0
+        
+    # Кэширование Gradle и зависимостей
+    - name: Cache Gradle dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+          .gradle/caches
+          .gradle/wrapper
+        key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          gradle-${{ runner.os }}-
+          
+    # Кэширование Android SDK
+    - name: Cache Android SDK
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ env.ANDROID_SDK_ROOT }}
+          ${{ env.ANDROID_NDK_HOME }}
+        key: android-sdk-${{ runner.os }}-${{ hashFiles('**/build.gradle*') }}
+        restore-keys: |
+          android-sdk-${{ runner.os }}-
 
     - name: Generate local.properties
       run: |
         echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
         echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
+        
+    - name: Make gradlew executable
+      run: chmod +x ./gradlew
+      
+    # Предварительная загрузка зависимостей
+    - name: Download dependencies
+      run: ./gradlew --no-daemon dependencies
     
-
-    - name: Clean project
-      run: ./gradlew clean
-
-    - name: Build Release APK
-      run: ./gradlew :fmp-demo:assembleRelease
-
-    - name: Upload Release APK
+    # Параллельная сборка обеих версий
+    - name: Build APKs
+      run: |
+        ./gradlew --no-daemon --parallel \
+          :fmp-demo:assembleRelease \
+          :fmp-demo:assembleDebug
+    
+    # Загрузка артефактов одним шагом
+    - name: Upload APKs
       uses: actions/upload-artifact@v4
       with:
-        name: FMPDemo-release.apk
-        path: fmp-demo/build/outputs/apk/release/fmp-demo-release.apk
-
-    - name: Build Debug APK
-      run: ./gradlew :fmp-demo:assembleDebug
-
-    - name: Upload Debug APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: FMPDemo-debug.apk
-        path: fmp-demo/build/outputs/apk/debug/fmp-demo-debug.apk
+        name: FMPDemo-APKs
+        path: |
+          fmp-demo/build/outputs/apk/release/fmp-demo-release.apk
+          fmp-demo/build/outputs/apk/debug/fmp-demo-debug.apk
+        retention-days: 30
