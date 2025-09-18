@@ -71,11 +71,9 @@ public class MainActivity extends FragmentActivity {
             
             Log.d(TAG, "MainActivity onCreate started");
             
-            // Создаем SkinWindow
             mSkinWindow = new SkinWindow(this);
             setContentView(mSkinWindow);
             
-            // Загружаем скин из ресурсов
             mSkinWindow.loadSkinFromAssets();
             
             Log.d(TAG, "SkinWindow created successfully");
@@ -216,8 +214,6 @@ public class MainActivity extends FragmentActivity {
         }
     };
     
-    
-    // SkinWindow класс - основной класс для рендеринга скинов
     public static class SkinWindow extends View {
         
         private Map<String, Bitmap> skinBitmaps;
@@ -226,33 +222,24 @@ public class MainActivity extends FragmentActivity {
         private Paint paint;
         private String mSkinLoadError = null;
         
-        // ОРИГИНАЛЬНЫЕ РАЗМЕРЫ (из JSON)
         private int mainWindowWidth = 275;
         private int mainWindowHeight = 116;
         
-        // Данные layout из JSON
         private Map<String, SkinElement> skinElements = new HashMap<>();
-        
-        // XML данные
         private Map<String, BitmapElement> xmlBitmaps = new HashMap<>();
         private Map<String, ElementStates> elementStates = new HashMap<>();
         
-        // --- исходные (оригинальные) битмапы ---
         private Bitmap mainOrig;
-        
-        // --- отмасштабированные кеши ---
         private Bitmap mainScaled;
         private float mainScale = 1.0f;
         private int mainScaledH = 0;
         private int mainOrigW = mainWindowWidth;
         private int mainOrigH = mainWindowHeight;
         
-        // Отслеживание нажатий
         private Set<String> pressedButtons = new HashSet<>();
         private boolean equalizerEnabled = false;
         private boolean playlistEnabled = false;
         
-        // Класс для хранения информации о bitmap элементе из XML
         private static class BitmapElement {
             String id;
             String file;
@@ -267,7 +254,6 @@ public class MainActivity extends FragmentActivity {
             }
         }
         
-        // Класс для хранения состояний элемента (normal, pressed, etc)
         private static class ElementStates {
             BitmapElement normal;
             BitmapElement pressed;
@@ -276,7 +262,6 @@ public class MainActivity extends FragmentActivity {
             BitmapElement enabled;
         }
         
-        // Класс для хранения данных об элементе skin
         private static class SkinElement {
             String id;
             int left;
@@ -287,20 +272,12 @@ public class MainActivity extends FragmentActivity {
         
         public SkinWindow(Context context) {
             super(context);
-            try {
-                init();
-            } catch (Exception e) {
-                Log.e(TAG, "Error in SkinWindow constructor", e);
-            }
+            init();
         }
         
         public SkinWindow(Context context, AttributeSet attrs) {
             super(context, attrs);
-            try {
-                init();
-            } catch (Exception e) {
-                Log.e(TAG, "Error in SkinWindow constructor", e);
-            }
+            init();
         }
         
         private void init() {
@@ -308,7 +285,6 @@ public class MainActivity extends FragmentActivity {
             paint.setAntiAlias(true);
             skinBitmaps = new HashMap<>();
             buttonRegions = new HashMap<>();
-            
             Log.d(TAG, "SkinWindow initialized");
         }
         
@@ -316,106 +292,58 @@ public class MainActivity extends FragmentActivity {
             try {
                 Log.d(TAG, "Loading skin from assets");
                 
-                // Создаем временную папку для извлечения
                 File tempDir = new File(getContext().getCacheDir(), "skin_temp");
-                Log.d(TAG, "Temp directory: " + tempDir.getAbsolutePath());
-                
                 if (tempDir.exists()) {
-                    Log.d(TAG, "Temp directory exists, deleting...");
                     deleteRecursive(tempDir);
                 }
                 
                 if (!tempDir.mkdirs()) {
-                    String error = "Cannot create temp directory: " + tempDir.getAbsolutePath();
-                    Log.e(TAG, error);
-                    showError(error);
-                    return;
-                }
-                Log.d(TAG, "Temp directory created successfully");
-                
-                // Извлекаем .wsz файл из assets
-                Log.d(TAG, "Opening default.wsz from assets");
-                try {
-                    InputStream inputStream = getContext().getAssets().open("default.wsz");
-                    Log.d(TAG, "Successfully opened default.wsz from assets");
-                    
-                    try (ZipInputStream zis = new ZipInputStream(inputStream)) {
-                        ZipEntry entry;
-                        byte[] buffer = new byte[1024];
-                        int extractedFiles = 0;
-                        
-                        Log.d(TAG, "Starting ZIP extraction");
-                        while ((entry = zis.getNextEntry()) != null) {
-                            if (entry.isDirectory()) continue;
-                            
-                            File outFile = new File(tempDir, entry.getName());
-                            File parentDir = outFile.getParentFile();
-                            if (parentDir != null && !parentDir.exists()) {
-                                Log.d(TAG, "Creating parent directory: " + parentDir.getAbsolutePath());
-                                if (!parentDir.mkdirs()) {
-                                    Log.w(TAG, "Failed to create parent directory: " + parentDir.getAbsolutePath());
-                                }
-                            }
-                            
-                            Log.d(TAG, "Extracting: " + entry.getName() + " to " + outFile.getAbsolutePath());
-                            try (FileOutputStream fos = new FileOutputStream(outFile)) {
-                                int len;
-                                while ((len = zis.read(buffer)) > 0) {
-                                    fos.write(buffer, 0, len);
-                                }
-                            }
-                            
-                            extractedFiles++;
-                            Log.d(TAG, "Extracted: " + entry.getName() + " (" + entry.getSize() + " bytes)");
-                        }
-                        
-                        Log.d(TAG, "Extraction completed. Total files: " + extractedFiles);
-                        
-                        if (extractedFiles == 0) {
-                            String error = "No files found in the skin archive";
-                            Log.e(TAG, error);
-                            showError(error);
-                            return;
-                        }
-                    } catch (IOException e) {
-                        String error = "Error extracting skin: " + e.getMessage();
-                        Log.e(TAG, error, e);
-                        showError(error);
-                        return;
-                    }
-                } catch (IOException e) {
-                    String error = "Cannot open default.wsz from assets: " + e.getMessage();
-                    Log.e(TAG, error, e);
-                    showError(error);
+                    showError("Cannot create temp directory");
                     return;
                 }
                 
-                // Загружаем bitmap'ы
+                extractWSZ(tempDir);
                 loadBitmaps(tempDir);
-                
-                // Загружаем XML конфигурацию из assets
                 loadXMLConfiguration();
-                
-                // Загружаем layout из JSON
                 loadLayoutFromJSON(tempDir);
-                
-                // Создаем элементы с состояниями
                 createElementStates();
                 
-                // Очищаем временную папку
                 deleteRecursive(tempDir);
                 
-                Log.i(TAG, "Skin loaded successfully from assets");
+                Log.i(TAG, "Skin loaded successfully");
                 
             } catch (Exception e) {
-                String error = "Unexpected error loading skin: " + e.getClass().getSimpleName() + ": " + e.getMessage();
-                Log.e(TAG, error, e);
-                showError(error);
+                Log.e(TAG, "Error loading skin", e);
+                showError("Error loading skin: " + e.getMessage());
+            }
+        }
+        
+        private void extractWSZ(File tempDir) throws IOException {
+            InputStream inputStream = getContext().getAssets().open("default.wsz");
+            try (ZipInputStream zis = new ZipInputStream(inputStream)) {
+                ZipEntry entry;
+                byte[] buffer = new byte[1024];
+                
+                while ((entry = zis.getNextEntry()) != null) {
+                    if (entry.isDirectory()) continue;
+                    
+                    File outFile = new File(tempDir, entry.getName());
+                    File parentDir = outFile.getParentFile();
+                    if (parentDir != null && !parentDir.exists()) {
+                        parentDir.mkdirs();
+                    }
+                    
+                    try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                        int len;
+                        while ((len = zis.read(buffer)) > 0) {
+                            fos.write(buffer, 0, len);
+                        }
+                    }
+                }
             }
         }
         
         private void loadBitmaps(File skinDir) {
-            // Создаем map всех файлов в директории без учета регистра
             Map<String, File> allFilesMap = new HashMap<>();
             File[] allFiles = skinDir.listFiles();
             if (allFiles != null) {
@@ -424,7 +352,6 @@ public class MainActivity extends FragmentActivity {
                 }
             }
         
-            // Список битмапов, которые мы ищем (в нижнем регистре для сравнения)
             String[] bitmapNames = {
                 "main.bmp", "cbuttons.bmp", "titlebar.bmp", 
                 "text.bmp", "numbers.bmp", "volume.bmp", 
@@ -433,36 +360,23 @@ public class MainActivity extends FragmentActivity {
                 "posbar.bmp", "numfont.png", "nums_ex.bmp", "genex.bmp"
             };
             
-            Log.d(TAG, "Loading bitmaps from: " + skinDir.getAbsolutePath());
-            
             int loadedCount = 0;
             for (String name : bitmapNames) {
-                // Ищем файл без учета регистра
                 File bmpFile = allFilesMap.get(name.toLowerCase());
                 
                 if (bmpFile != null && bmpFile.exists()) {
                     try {
-                        Log.d(TAG, "Found bitmap, decoding: " + bmpFile.getName());
                         Bitmap bitmap = BitmapFactory.decodeFile(bmpFile.getAbsolutePath());
                         if (bitmap != null) {
-                            // Сохраняем с оригинальным именем (в нижнем регистре для consistency)
                             skinBitmaps.put(name, bitmap);
                             loadedCount++;
-                            Log.d(TAG, "Loaded bitmap: " + name + " (" + bitmap.getWidth() + "x" + bitmap.getHeight() + ")");
-                        } else {
-                            Log.w(TAG, "Failed to decode bitmap: " + name);
                         }
                     } catch (Exception e) {
                         Log.w(TAG, "Could not load bitmap: " + name, e);
                     }
-                } else {
-                    Log.d(TAG, "Bitmap file not found: " + name);
                 }
             }
         
-            Log.i(TAG, "Loaded " + loadedCount + " skin bitmaps");
-            
-            // Привяжем основные битмапы к полям
             Bitmap mb = skinBitmaps.get("main.bmp");
             if (mb != null) {
                 mainOrig = mb;
@@ -470,19 +384,10 @@ public class MainActivity extends FragmentActivity {
                 mainOrigH = mainOrig.getHeight();
             }
             
-            if (loadedCount == 0) {
-                String error = "No bitmaps were loaded from the skin";
-                Log.e(TAG, error);
-                showError(error);
-            }
-            
-            // Перерисовываем после загрузки
             post(this::invalidate);
         }
         
         private void loadXMLConfiguration() {
-            Log.d(TAG, "Loading XML configuration from assets");
-            
             String[] xmlFiles = {
                 "wacup-classic-elements.xml",
                 "classic-genex.xml", 
@@ -491,21 +396,17 @@ public class MainActivity extends FragmentActivity {
             
             for (String xmlFile : xmlFiles) {
                 try {
-                    Log.d(TAG, "Loading XML file: " + xmlFile);
                     InputStream xmlStream = getContext().getAssets().open(xmlFile);
-                    parseXMLFile(xmlStream, xmlFile);
+                    parseXMLFile(xmlStream);
                     xmlStream.close();
                 } catch (IOException e) {
-                    Log.w(TAG, "Could not load XML file: " + xmlFile + ", error: " + e.getMessage());
+                    Log.w(TAG, "Could not load XML file: " + xmlFile);
                 }
             }
-            
-            Log.i(TAG, "Loaded " + xmlBitmaps.size() + " bitmap definitions from XML");
         }
         
-        private void parseXMLFile(InputStream xmlStream, String fileName) {
+        private void parseXMLFile(InputStream xmlStream) {
             try {
-                // Читаем весь файл в строку
                 BufferedReader reader = new BufferedReader(new InputStreamReader(xmlStream));
                 StringBuilder xmlContent = new StringBuilder();
                 String line;
@@ -514,17 +415,14 @@ public class MainActivity extends FragmentActivity {
                 }
                 reader.close();
                 
-                // Простой парсинг bitmap тегов
-                String xmlString = xmlContent.toString();
-                parseBitmapTags(xmlString);
+                parseBitmapTags(xmlContent.toString());
                 
             } catch (Exception e) {
-                Log.e(TAG, "Error parsing XML file " + fileName, e);
+                Log.e(TAG, "Error parsing XML file", e);
             }
         }
         
         private void parseBitmapTags(String xmlContent) {
-            // Простой парсер для тегов <bitmap>
             String[] lines = xmlContent.split("\n");
             
             for (String line : lines) {
@@ -534,8 +432,6 @@ public class MainActivity extends FragmentActivity {
                         BitmapElement element = parseBitmapTag(line);
                         if (element != null) {
                             xmlBitmaps.put(element.id, element);
-                            Log.d(TAG, "Parsed bitmap: " + element.id + " from " + element.file + 
-                                  " (" + element.x + "," + element.y + "," + element.w + "," + element.h + ")");
                         }
                     } catch (Exception e) {
                         Log.w(TAG, "Error parsing bitmap line: " + line, e);
@@ -546,7 +442,6 @@ public class MainActivity extends FragmentActivity {
         
         private BitmapElement parseBitmapTag(String line) {
             try {
-                // Извлекаем атрибуты из строки вида: <bitmap id="play" file="skin/cbuttons.bmp" x="23" y="0" h="18" w="23"/>
                 String id = extractAttribute(line, "id");
                 String file = extractAttribute(line, "file");
                 
@@ -569,7 +464,6 @@ public class MainActivity extends FragmentActivity {
                 return element;
                 
             } catch (Exception e) {
-                Log.w(TAG, "Error parsing bitmap tag: " + line, e);
                 return null;
             }
         }
@@ -587,23 +481,16 @@ public class MainActivity extends FragmentActivity {
         }
         
         private void createElementStates() {
-            Log.d(TAG, "Creating element states");
-            
-            // Создаем состояния для кнопок плеера
             createButtonStates("play-pause", "play", "playp");
             createButtonStates("previous", "prev", "prevp");
             createButtonStates("next", "next", "nextp");
             createButtonStates("stop", "stop", "stopp");
             
-            // Создаем состояния для переключателей
             createTogglerStates("equalizer-button", "player.toggler.eq");
             createTogglerStates("playlist-button", "player.toggler.pl");
             
-            // Создаем состояния для repeat/shuffle
             createButtonStates("repeat", "rep", "repp", "repa");
             createButtonStates("shuffle", "shuf", "shufp", "shufa");
-            
-            Log.i(TAG, "Created " + elementStates.size() + " element state definitions");
         }
         
         private void createButtonStates(String elementId, String normalId, String pressedId) {
@@ -620,7 +507,6 @@ public class MainActivity extends FragmentActivity {
             
             if (states.normal != null || states.pressed != null) {
                 elementStates.put(elementId, states);
-                Log.d(TAG, "Created button states for: " + elementId);
             }
         }
         
@@ -632,13 +518,10 @@ public class MainActivity extends FragmentActivity {
             
             if (states.disabled != null || states.enabled != null || states.pressed != null) {
                 elementStates.put(elementId, states);
-                Log.d(TAG, "Created toggler states for: " + elementId);
             }
         }
 
         private void loadLayoutFromJSON(File skinDir) {
-            
-            // Предположим, что skinDir - это File, указывающий на целевую директорию
             try {
                 InputStream layoutInputStream = getContext().getAssets().open("layout.json");
                 FileOutputStream layoutOutputStream = new FileOutputStream(new File(skinDir, "layout.json"));
@@ -649,22 +532,17 @@ public class MainActivity extends FragmentActivity {
                 }
                 layoutInputStream.close();
                 layoutOutputStream.close();
-                Log.d(TAG, "Copied layout.json from assets to " + skinDir.getAbsolutePath());
             } catch (IOException e) {
                 Log.e(TAG, "Failed to copy layout.json from assets", e);
                 return;
             }
             
-            
             try {
-                // Ищем файл layout.json
                 File layoutFile = new File(skinDir, "layout.json");
                 if (!layoutFile.exists()) {
-                    Log.w(TAG, "layout.json not found in skin");
                     return;
                 }
 
-                // Читаем файл
                 BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(layoutFile)));
                 StringBuilder stringBuilder = new StringBuilder();
                 String line;
@@ -675,8 +553,6 @@ public class MainActivity extends FragmentActivity {
 
                 String jsonString = stringBuilder.toString();
                 JSONObject jsonObject = new JSONObject(jsonString);
-
-                // Парсим элементы
                 JSONObject elements = jsonObject.getJSONObject("elements");
                 Iterator<String> keys = elements.keys();
 
@@ -693,13 +569,11 @@ public class MainActivity extends FragmentActivity {
 
                     skinElements.put(element.id, element);
 
-                    // Если это главное окно, запоминаем его размеры
                     if ("main-window".equals(element.id)) {
                         mainWindowWidth = element.width;
                         mainWindowHeight = element.height;
                     }
 
-                    // Добавляем region для кликабельных элементов
                     if (isClickableElement(element.id)) {
                         buttonRegions.put(element.id, 
                             new Rect(element.left, element.top, 
@@ -708,15 +582,12 @@ public class MainActivity extends FragmentActivity {
                     }
                 }
 
-                Log.i(TAG, "Loaded " + skinElements.size() + " skin elements from JSON");
-
             } catch (Exception e) {
                 Log.e(TAG, "Error loading layout from JSON", e);
             }
         }
 
         private boolean isClickableElement(String elementId) {
-            // Определяем, какие элементы являются кликабельными
             return elementId.equals("play-pause") || 
                    elementId.equals("previous") ||
                    elementId.equals("next") ||
@@ -750,15 +621,12 @@ public class MainActivity extends FragmentActivity {
         
         public void setMediaService(IMediaPlaybackService service) {
             mService = service;
-            Log.d(TAG, "Media service set to SkinWindow");
             updateDisplay();
         }
         
         @Override
         protected void onSizeChanged(int w, int h, int oldw, int oldh) {
             super.onSizeChanged(w, h, oldw, oldh);
-            Log.d(TAG, "Size changed: " + w + "x" + h);
-            // Пересчитываем scaled main bitmap
             prepareMainScaled(w, h);
             invalidate();
         }
@@ -797,12 +665,14 @@ public class MainActivity extends FragmentActivity {
                     return;
                 }
                 
-                // Рисуем главное окно как фон
                 if (mainScaled != null) {
+                    canvas.drawBitmap(mainScaled, 0, 0, paint);
+                } else if (mainOrig != null) {
+                    Rect src = new Rect(0, 0, mainOrig.getWidth(), mainOrig.getHeight());
+                    Rect dest = new Rect(0, 0, viewW, Math.max(1, Math.round((float)mainOrig.getHeight() * ((float)viewW / (float)mainOrig.getWidth()))));
                     canvas.drawBitmap(mainOrig, src, dest, paint);
                 }
                 
-                // Если есть элементы из JSON, рисуем их поверх фона
                 if (!skinElements.isEmpty()) {
                     drawUsingJSONLayout(canvas, viewW, viewH);
                 }
@@ -813,7 +683,6 @@ public class MainActivity extends FragmentActivity {
         }
         
         private void drawFallback(Canvas canvas, int viewW, int viewH) {
-            // Рисуем заглушку если скин не загружен с информацией об ошибке
             paint.setColor(0xFF333333);
             canvas.drawRect(0, 0, viewW, viewH, paint);
             paint.setColor(0xFFFFFFFF);
@@ -824,7 +693,6 @@ public class MainActivity extends FragmentActivity {
                 errorMessage += "\nError: " + mSkinLoadError;
             }
             
-            // Разбиваем сообщение на строки для отображения
             String[] lines = errorMessage.split("\n");
             for (int i = 0; i < lines.length; i++) {
                 canvas.drawText(lines[i], 50, 50 + i * 30, paint);
@@ -832,29 +700,23 @@ public class MainActivity extends FragmentActivity {
         }
         
         private void drawUsingJSONLayout(Canvas canvas, int viewW, int viewH) {
-            // Масштабируем координаты согласно размеру view
             float scaleX = (float) viewW / mainWindowWidth;
             float scaleY = (float) viewH / mainWindowHeight;
             
-            // Рисуем элементы, кроме главного окна
             for (SkinElement element : skinElements.values()) {
-                // Пропускаем главное окно (уже нарисовано как фон)
                 if ("main-window".equals(element.id)) {
                     continue;
                 }
                 
-                // Пропускаем невидимые элементы
                 if (element.width <= 0 || element.height <= 0) {
                     continue;
                 }
                 
-                // Масштабируем координаты и размеры
                 int scaledLeft = (int) (element.left * scaleX);
                 int scaledTop = (int) (element.top * scaleY);
                 int scaledWidth = (int) (element.width * scaleX);
                 int scaledHeight = (int) (element.height * scaleY);
                 
-                // Определяем, какой битмап использовать для элемента
                 Bitmap elementBitmap = getBitmapForElement(element);
                 if (elementBitmap != null) {
                     Rect destRect = new Rect(scaledLeft, scaledTop, 
@@ -866,19 +728,15 @@ public class MainActivity extends FragmentActivity {
         }
         
         private Bitmap getBitmapForElement(SkinElement element) {
-            // Получаем состояния элемента
             ElementStates states = elementStates.get(element.id);
             if (states == null) {
-                // Если нет состояний, пытаемся найти прямое соответствие в XML
                 BitmapElement xmlElement = xmlBitmaps.get(element.id);
                 if (xmlElement != null) {
                     return extractBitmapRegion(xmlElement);
                 }
-                // Возвращаем null для элементов без битмапа
                 return null;
             }
             
-            // Определяем текущее состояние элемента
             BitmapElement currentElement = getCurrentElementState(element.id, states);
             if (currentElement != null) {
                 return extractBitmapRegion(currentElement);
@@ -888,13 +746,9 @@ public class MainActivity extends FragmentActivity {
         }
         
         private BitmapElement getCurrentElementState(String elementId, ElementStates states) {
-            // Определяем состояние на основе текущего состояния плеера/UI
             switch (elementId) {
                 case "play-pause":
-                    if (isPressed(elementId)) {
-                        return states.pressed;
-                    }
-                    return states.normal;
+                    return isPressed(elementId) ? states.pressed : states.normal;
                     
                 case "equalizer-button":
                     if (isPressed(elementId)) {
@@ -921,29 +775,23 @@ public class MainActivity extends FragmentActivity {
                     return isShuffleActive() ? states.active : states.normal;
                     
                 default:
-                    if (isPressed(elementId)) {
-                        return states.pressed;
-                    }
-                    return states.normal;
+                    return isPressed(elementId) ? states.pressed : states.normal;
             }
         }
         
         private Bitmap extractBitmapRegion(BitmapElement element) {
             if (element == null) return null;
             
-            // Получаем исходный bitmap по имени файла
             String fileName = element.file;
             if (fileName.startsWith("skin/")) {
-                fileName = fileName.substring(5); // убираем "skin/"
+                fileName = fileName.substring(5);
             }
             
             Bitmap sourceBitmap = skinBitmaps.get(fileName);
             if (sourceBitmap == null) {
-                Log.w(TAG, "Source bitmap not found: " + fileName);
                 return null;
             }
             
-            // Извлекаем область, если указаны размеры
             if (element.w > 0 && element.h > 0) {
                 try {
                     int x = Math.max(0, Math.min(element.x, sourceBitmap.getWidth() - 1));
@@ -962,7 +810,6 @@ public class MainActivity extends FragmentActivity {
             return sourceBitmap;
         }
         
-        // Методы для определения состояний
         private boolean isPressed(String elementId) {
             return pressedButtons.contains(elementId);
         }
@@ -994,7 +841,6 @@ public class MainActivity extends FragmentActivity {
             int viewH = getHeight();
             if (viewW == 0 || viewH == 0) return null;
             
-            // Масштабируем обратно в координаты оригинального layout
             float scaleX = (float) viewW / mainWindowWidth;
             float scaleY = (float) viewH / mainWindowHeight;
             
@@ -1027,30 +873,25 @@ public class MainActivity extends FragmentActivity {
         }
         
         private void handleTouchDown(float x, float y) {
-            // Маппим касание в оригинальные координаты
             float[] orig = mapTouchToOriginal(x, y);
             if (orig == null) return;
             float origX = orig[0];
             float origY = orig[1];
             
-            // Проверяем все кнопки из buttonRegions
             for (Map.Entry<String, Rect> entry : buttonRegions.entrySet()) {
                 String buttonName = entry.getKey();
                 Rect region = entry.getValue();
                 if (region.contains((int)origX, (int)origY)) {
-                    // Отмечаем кнопку как нажатую
                     pressedButtons.add(buttonName);
-                    invalidate(); // Перерисовываем для отображения pressed состояния
+                    invalidate();
                     return;
                 }
             }
         }
         
         private void handleTouchUp(float x, float y) {
-            // Маппим касание в оригинальные координаты
             float[] orig = mapTouchToOriginal(x, y);
             if (orig == null) {
-                // Снимаем все нажатия при выходе за границы
                 if (!pressedButtons.isEmpty()) {
                     pressedButtons.clear();
                     invalidate();
@@ -1060,7 +901,6 @@ public class MainActivity extends FragmentActivity {
             float origX = orig[0];
             float origY = orig[1];
             
-            // Проверяем все нажатые кнопки
             String clickedButton = null;
             for (String buttonName : pressedButtons) {
                 Rect region = buttonRegions.get(buttonName);
@@ -1070,15 +910,13 @@ public class MainActivity extends FragmentActivity {
                 }
             }
             
-            // Очищаем все нажатия
             pressedButtons.clear();
             
-            // Если кнопка была отпущена внутри своей области, обрабатываем клик
             if (clickedButton != null) {
                 handleButtonClick(clickedButton);
             }
             
-            invalidate(); // Перерисовываем для снятия pressed состояния
+            invalidate();
         }
         
         private void handleButtonClick(String buttonName) {
@@ -1161,17 +999,14 @@ public class MainActivity extends FragmentActivity {
         private void toggleEqualizer() {
             equalizerEnabled = !equalizerEnabled;
             Log.d(TAG, "Equalizer toggled: " + equalizerEnabled);
-            // TODO: Открыть окно эквалайзера
         }
         
         private void togglePlaylist() {
             playlistEnabled = !playlistEnabled;
             Log.d(TAG, "Playlist toggled: " + playlistEnabled);
-            // TODO: Открыть окно плейлиста
         }
         
         public void updateDisplay() {
-            // Перерисовываем окно при изменении состояния
             try {
                 post(this::invalidate);
             } catch (Exception e) {
@@ -1179,7 +1014,6 @@ public class MainActivity extends FragmentActivity {
             }
         }
         
-        // Утилита: безопасно утилизировать bitmap
         private void safeRecycleBitmap(Bitmap bmp) {
             try {
                 if (bmp != null && !bmp.isRecycled()) {
@@ -1190,8 +1024,4 @@ public class MainActivity extends FragmentActivity {
             }
         }
     }
-}Bitmap(mainScaled, 0, 0, paint);
-                } else if (mainOrig != null) {
-                    Rect src = new Rect(0, 0, mainOrig.getWidth(), mainOrig.getHeight());
-                    Rect dest = new Rect(0, 0, viewW, Math.max(1, Math.round((float)mainOrig.getHeight() * ((float)viewW / (float)mainOrig.getWidth()))));
-                    canvas.draw
+}
