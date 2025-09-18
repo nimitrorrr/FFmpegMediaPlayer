@@ -549,18 +549,20 @@ public class MainActivity extends FragmentActivity {
         }
         
         private void createElementStates() {
-            addDebugMessage("Creating element states...");
+            // Обновляем ID элементов согласно структуре XML
+            createButtonStates("play-pause", "wacup.play", "wacup.play.pressed");
+            createButtonStates("previous", "wacup.prev", "wacup.prev.pressed");
+            createButtonStates("next", "wacup.next", "wacup.next.pressed");
+            createButtonStates("stop", "wacup.stop", "wacup.stop.pressed");
             
-            createButtonStates("play-pause", "play", "playp");
-            createButtonStates("previous", "prev", "prevp");
-            createButtonStates("next", "next", "nextp");
-            createButtonStates("stop", "stop", "stopp");
+            createTogglerStates("equalizer-button", "wacup.toggler.eq");
+            createTogglerStates("playlist-button", "wacup.toggler.pl");
             
-            createTogglerStates("equalizer-button", "player.toggler.eq");
-            createTogglerStates("playlist-button", "player.toggler.pl");
+            createButtonStates("repeat", "wacup.repeat", "wacup.repeat.pressed", "wacup.repeat.active");
+            createButtonStates("shuffle", "wacup.shuffle", "wacup.shuffle.pressed", "wacup.shuffle.active");
             
-            createButtonStates("repeat", "rep", "repp", "repa");
-            createButtonStates("shuffle", "shuf", "shufp", "shufa");
+            addDebugMessage("Element states created with wacup.* identifiers");
+        }
             
             addDebugMessage("Element states created: " + elementStates.size());
             
