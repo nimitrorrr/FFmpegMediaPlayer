@@ -45,6 +45,8 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import org.json.JSONObject;
@@ -240,6 +242,10 @@ public class MainActivity extends FragmentActivity {
         private boolean equalizerEnabled = false;
         private boolean playlistEnabled = false;
         
+        // Debug информация
+        private List<String> debugMessages = new ArrayList<>();
+        private boolean showDebugInfo = false;
+        
         private static class BitmapElement {
             String id;
             String file;
@@ -285,12 +291,18 @@ public class MainActivity extends FragmentActivity {
             paint.setAntiAlias(true);
             skinBitmaps = new HashMap<>();
             buttonRegions = new HashMap<>();
+            debugMessages = new ArrayList<>();
             Log.d(TAG, "SkinWindow initialized");
+        }
+        
+        private void addDebugMessage(String message) {
+            debugMessages.add(message);
+            Log.d(TAG, "DEBUG: " + message);
         }
         
         public void loadSkinFromAssets() {
             try {
-                Log.d(TAG, "Loading skin from assets");
+                addDebugMessage("=== LOADING SKIN ===");
                 
                 File tempDir = new File(getContext().getCacheDir(), "skin_temp");
                 if (tempDir.exists()) {
@@ -298,23 +310,43 @@ public class MainActivity extends FragmentActivity {
                 }
                 
                 if (!tempDir.mkdirs()) {
+                    addDebugMessage("ERROR: Cannot create temp directory");
                     showError("Cannot create temp directory");
                     return;
                 }
                 
+                addDebugMessage("1. Extracting WSZ...");
                 extractWSZ(tempDir);
+                
+                addDebugMessage("2. Loading bitmaps...");
                 loadBitmaps(tempDir);
+                
+                addDebugMessage("3. Loading XML config...");
                 loadXMLConfiguration();
+                
+                addDebugMessage("4. Loading JSON layout...");
                 loadLayoutFromJSON(tempDir);
+                
+                addDebugMessage("5. Creating element states...");
                 createElementStates();
                 
                 deleteRecursive(tempDir);
                 
-                Log.i(TAG, "Skin loaded successfully");
+                addDebugMessage("=== LOADING COMPLETE ===");
+                addDebugMessage("Skin bitmaps: " + skinBitmaps.size());
+                addDebugMessage("XML bitmaps: " + xmlBitmaps.size());
+                addDebugMessage("Skin elements: " + skinElements.size());
+                addDebugMessage("Element states: " + elementStates.size());
+                
+                // Показываем debug информацию если что-то не загрузилось
+                if (skinBitmaps.isEmpty() || xmlBitmaps.isEmpty() || skinElements.isEmpty()) {
+                    showDebugInfo = true;
+                }
                 
             } catch (Exception e) {
-                Log.e(TAG, "Error loading skin", e);
+                addDebugMessage("ERROR: " + e.getMessage());
                 showError("Error loading skin: " + e.getMessage());
+                showDebugInfo = true;
             }
         }
         
@@ -323,6 +355,7 @@ public class MainActivity extends FragmentActivity {
             try (ZipInputStream zis = new ZipInputStream(inputStream)) {
                 ZipEntry entry;
                 byte[] buffer = new byte[1024];
+                int extractedFiles = 0;
                 
                 while ((entry = zis.getNextEntry()) != null) {
                     if (entry.isDirectory()) continue;
@@ -339,7 +372,10 @@ public class MainActivity extends FragmentActivity {
                             fos.write(buffer, 0, len);
                         }
                     }
+                    extractedFiles++;
                 }
+                
+                addDebugMessage("Extracted " + extractedFiles + " files from WSZ");
             }
         }
         
@@ -350,6 +386,10 @@ public class MainActivity extends FragmentActivity {
                 for (File file : allFiles) {
                     allFilesMap.put(file.getName().toLowerCase(), file);
                 }
+                addDebugMessage("Found " + allFiles.length + " files in extracted WSZ");
+            } else {
+                addDebugMessage("ERROR: No files found in skin directory");
+                return;
             }
         
             String[] bitmapNames = {
@@ -370,10 +410,15 @@ public class MainActivity extends FragmentActivity {
                         if (bitmap != null) {
                             skinBitmaps.put(name, bitmap);
                             loadedCount++;
+                            addDebugMessage("Loaded: " + name + " (" + bitmap.getWidth() + "x" + bitmap.getHeight() + ")");
+                        } else {
+                            addDebugMessage("ERROR: Failed to decode " + name);
                         }
                     } catch (Exception e) {
-                        Log.w(TAG, "Could not load bitmap: " + name, e);
+                        addDebugMessage("ERROR loading " + name + ": " + e.getMessage());
                     }
+                } else {
+                    addDebugMessage("Missing: " + name);
                 }
             }
         
@@ -382,6 +427,9 @@ public class MainActivity extends FragmentActivity {
                 mainOrig = mb;
                 mainOrigW = mainOrig.getWidth();
                 mainOrigH = mainOrig.getHeight();
+                addDebugMessage("Main bitmap: " + mainOrigW + "x" + mainOrigH);
+            } else {
+                addDebugMessage("ERROR: No main.bmp found");
             }
             
             post(this::invalidate);
@@ -397,15 +445,31 @@ public class MainActivity extends FragmentActivity {
             for (String xmlFile : xmlFiles) {
                 try {
                     InputStream xmlStream = getContext().getAssets().open(xmlFile);
-                    parseXMLFile(xmlStream);
+                    parseXMLFile(xmlStream, xmlFile);
                     xmlStream.close();
+                    addDebugMessage("Loaded XML: " + xmlFile);
                 } catch (IOException e) {
-                    Log.w(TAG, "Could not load XML file: " + xmlFile);
+                    addDebugMessage("ERROR: Cannot load " + xmlFile + " - " + e.getMessage());
                 }
+            }
+            
+            addDebugMessage("Total XML bitmaps: " + xmlBitmaps.size());
+            
+            // Показываем первые 10 XML bitmap'ов для отладки
+            int count = 0;
+            for (String key : xmlBitmaps.keySet()) {
+                if (count < 10) {
+                    BitmapElement elem = xmlBitmaps.get(key);
+                    addDebugMessage("XML: " + key + " -> " + elem.file + " (" + elem.x + "," + elem.y + "," + elem.w + "," + elem.h + ")");
+                }
+                count++;
+            }
+            if (xmlBitmaps.size() > 10) {
+                addDebugMessage("... and " + (xmlBitmaps.size() - 10) + " more XML bitmaps");
             }
         }
         
-        private void parseXMLFile(InputStream xmlStream) {
+        private void parseXMLFile(InputStream xmlStream, String fileName) {
             try {
                 BufferedReader reader = new BufferedReader(new InputStreamReader(xmlStream));
                 StringBuilder xmlContent = new StringBuilder();
@@ -418,12 +482,13 @@ public class MainActivity extends FragmentActivity {
                 parseBitmapTags(xmlContent.toString());
                 
             } catch (Exception e) {
-                Log.e(TAG, "Error parsing XML file", e);
+                addDebugMessage("ERROR parsing " + fileName + ": " + e.getMessage());
             }
         }
         
         private void parseBitmapTags(String xmlContent) {
             String[] lines = xmlContent.split("\n");
+            int parsedCount = 0;
             
             for (String line : lines) {
                 line = line.trim();
@@ -432,12 +497,15 @@ public class MainActivity extends FragmentActivity {
                         BitmapElement element = parseBitmapTag(line);
                         if (element != null) {
                             xmlBitmaps.put(element.id, element);
+                            parsedCount++;
                         }
                     } catch (Exception e) {
-                        Log.w(TAG, "Error parsing bitmap line: " + line, e);
+                        addDebugMessage("ERROR parsing line: " + line + " - " + e.getMessage());
                     }
                 }
             }
+            
+            addDebugMessage("Parsed " + parsedCount + " bitmap tags");
         }
         
         private BitmapElement parseBitmapTag(String line) {
@@ -481,6 +549,8 @@ public class MainActivity extends FragmentActivity {
         }
         
         private void createElementStates() {
+            addDebugMessage("Creating element states...");
+            
             createButtonStates("play-pause", "play", "playp");
             createButtonStates("previous", "prev", "prevp");
             createButtonStates("next", "next", "nextp");
@@ -491,6 +561,20 @@ public class MainActivity extends FragmentActivity {
             
             createButtonStates("repeat", "rep", "repp", "repa");
             createButtonStates("shuffle", "shuf", "shufp", "shufa");
+            
+            addDebugMessage("Element states created: " + elementStates.size());
+            
+            // Debug info для каждого элемента
+            for (String elementId : elementStates.keySet()) {
+                ElementStates states = elementStates.get(elementId);
+                String stateInfo = elementId + ": ";
+                if (states.normal != null) stateInfo += "normal ";
+                if (states.pressed != null) stateInfo += "pressed ";
+                if (states.active != null) stateInfo += "active ";
+                if (states.enabled != null) stateInfo += "enabled ";
+                if (states.disabled != null) stateInfo += "disabled ";
+                addDebugMessage(stateInfo);
+            }
         }
         
         private void createButtonStates(String elementId, String normalId, String pressedId) {
@@ -507,6 +591,9 @@ public class MainActivity extends FragmentActivity {
             
             if (states.normal != null || states.pressed != null) {
                 elementStates.put(elementId, states);
+                addDebugMessage("Created states for " + elementId + " (normal:" + (states.normal != null) + " pressed:" + (states.pressed != null) + ")");
+            } else {
+                addDebugMessage("ERROR: No states found for " + elementId + " (looking for " + normalId + ", " + pressedId + ")");
             }
         }
         
@@ -518,6 +605,9 @@ public class MainActivity extends FragmentActivity {
             
             if (states.disabled != null || states.enabled != null || states.pressed != null) {
                 elementStates.put(elementId, states);
+                addDebugMessage("Created toggler states for " + elementId);
+            } else {
+                addDebugMessage("ERROR: No toggler states found for " + elementId + " (looking for " + baseId + ".*)");
             }
         }
 
@@ -532,14 +622,16 @@ public class MainActivity extends FragmentActivity {
                 }
                 layoutInputStream.close();
                 layoutOutputStream.close();
+                addDebugMessage("Copied layout.json from assets");
             } catch (IOException e) {
-                Log.e(TAG, "Failed to copy layout.json from assets", e);
+                addDebugMessage("ERROR: Failed to copy layout.json - " + e.getMessage());
                 return;
             }
             
             try {
                 File layoutFile = new File(skinDir, "layout.json");
                 if (!layoutFile.exists()) {
+                    addDebugMessage("ERROR: layout.json not found");
                     return;
                 }
 
@@ -556,6 +648,7 @@ public class MainActivity extends FragmentActivity {
                 JSONObject elements = jsonObject.getJSONObject("elements");
                 Iterator<String> keys = elements.keys();
 
+                int elementCount = 0;
                 while (keys.hasNext()) {
                     String key = keys.next();
                     JSONObject elementJson = elements.getJSONObject(key);
@@ -568,10 +661,12 @@ public class MainActivity extends FragmentActivity {
                     element.height = elementJson.getInt("height");
 
                     skinElements.put(element.id, element);
+                    elementCount++;
 
                     if ("main-window".equals(element.id)) {
                         mainWindowWidth = element.width;
                         mainWindowHeight = element.height;
+                        addDebugMessage("Main window: " + mainWindowWidth + "x" + mainWindowHeight);
                     }
 
                     if (isClickableElement(element.id)) {
@@ -579,11 +674,14 @@ public class MainActivity extends FragmentActivity {
                             new Rect(element.left, element.top, 
                                     element.left + element.width, 
                                     element.top + element.height));
+                        addDebugMessage("Clickable: " + element.id + " at (" + element.left + "," + element.top + ")");
                     }
                 }
 
+                addDebugMessage("Loaded " + elementCount + " JSON elements");
+
             } catch (Exception e) {
-                Log.e(TAG, "Error loading layout from JSON", e);
+                addDebugMessage("ERROR loading JSON: " + e.getMessage());
             }
         }
 
@@ -614,7 +712,7 @@ public class MainActivity extends FragmentActivity {
         
         private void showError(String message) {
             mSkinLoadError = message;
-            Log.e(TAG, message);
+            addDebugMessage("SHOW ERROR: " + message);
             Toast.makeText(getContext(), message, Toast.LENGTH_LONG).show();
             post(this::invalidate);
         }
@@ -643,7 +741,7 @@ public class MainActivity extends FragmentActivity {
                 try {
                     mainScaled = Bitmap.createScaledBitmap(mainOrig, viewWidth, mainScaledH, true);
                 } catch (OutOfMemoryError oom) {
-                    Log.e(TAG, "OOM scaling main bitmap", oom);
+                    addDebugMessage("ERROR: OOM scaling main bitmap");
                     mainScaled = null;
                 }
             } else {
@@ -660,11 +758,12 @@ public class MainActivity extends FragmentActivity {
                 int viewW = getWidth();
                 int viewH = getHeight();
                 
-                if (skinBitmaps.isEmpty()) {
-                    drawFallback(canvas, viewW, viewH);
+                if (showDebugInfo || skinBitmaps.isEmpty()) {
+                    drawDebugInfo(canvas, viewW, viewH);
                     return;
                 }
                 
+                // Рисуем главное окно как фон
                 if (mainScaled != null) {
                     canvas.drawBitmap(mainScaled, 0, 0, paint);
                 } else if (mainOrig != null) {
@@ -673,36 +772,72 @@ public class MainActivity extends FragmentActivity {
                     canvas.drawBitmap(mainOrig, src, dest, paint);
                 }
                 
+                // Рисуем элементы поверх фона
                 if (!skinElements.isEmpty()) {
                     drawUsingJSONLayout(canvas, viewW, viewH);
                 }
                 
             } catch (Exception e) {
-                Log.e(TAG, "Error in onDraw", e);
+                addDebugMessage("ERROR in onDraw: " + e.getMessage());
+                showDebugInfo = true;
+                invalidate();
             }
         }
         
-        private void drawFallback(Canvas canvas, int viewW, int viewH) {
-            paint.setColor(0xFF333333);
+        private void drawDebugInfo(Canvas canvas, int viewW, int viewH) {
+            paint.setColor(0xFF000000);
             canvas.drawRect(0, 0, viewW, viewH, paint);
-            paint.setColor(0xFFFFFFFF);
-            paint.setTextSize(24);
+            paint.setColor(0xFF00FF00);
+            paint.setTextSize(12);
             
-            String errorMessage = "No skin loaded";
-            if (mSkinLoadError != null) {
-                errorMessage += "\nError: " + mSkinLoadError;
+            int y = 20;
+            int lineHeight = 15;
+            
+            // Показываем последние сообщения
+            int startIndex = Math.max(0, debugMessages.size() - 40); // Показываем последние 40 сообщений
+            for (int i = startIndex; i < debugMessages.size(); i++) {
+                String message = debugMessages.get(i);
+                
+                // Разбиваем длинные строки
+                if (message.length() > 50) {
+                    String[] parts = message.split(" ");
+                    StringBuilder currentLine = new StringBuilder();
+                    
+                    for (String part : parts) {
+                        if (currentLine.length() + part.length() > 50) {
+                            canvas.drawText(currentLine.toString(), 5, y, paint);
+                            y += lineHeight;
+                            currentLine = new StringBuilder(part + " ");
+                        } else {
+                            currentLine.append(part).append(" ");
+                        }
+                    }
+                    
+                    if (currentLine.length() > 0) {
+                        canvas.drawText(currentLine.toString(), 5, y, paint);
+                        y += lineHeight;
+                    }
+                } else {
+                    canvas.drawText(message, 5, y, paint);
+                    y += lineHeight;
+                }
+                
+                if (y > viewH - 20) break; // Не выходим за границы экрана
             }
             
-            String[] lines = errorMessage.split("\n");
-            for (int i = 0; i < lines.length; i++) {
-                canvas.drawText(lines[i], 50, 50 + i * 30, paint);
-            }
+            // Добавляем инструкцию
+            paint.setColor(0xFFFFFF00);
+            canvas.drawText("Tap screen to toggle debug/normal view", 5, viewH - 5, paint);
         }
         
         private void drawUsingJSONLayout(Canvas canvas, int viewW, int viewH) {
             float scaleX = (float) viewW / mainWindowWidth;
             float scaleY = (float) viewH / mainWindowHeight;
             
+            addDebugMessage("=== DRAWING ELEMENTS ===");
+            addDebugMessage("Scale: " + scaleX + " x " + scaleY);
+            
+            int drawnElements = 0;
             for (SkinElement element : skinElements.values()) {
                 if ("main-window".equals(element.id)) {
                     continue;
@@ -723,23 +858,36 @@ public class MainActivity extends FragmentActivity {
                                             scaledLeft + scaledWidth, 
                                             scaledTop + scaledHeight);
                     canvas.drawBitmap(elementBitmap, null, destRect, paint);
+                    drawnElements++;
+                    addDebugMessage("DRAWN: " + element.id + " at (" + scaledLeft + "," + scaledTop + ")");
+                } else {
+                    addDebugMessage("NO BITMAP: " + element.id);
                 }
             }
+            
+            addDebugMessage("Drew " + drawnElements + " elements");
         }
         
         private Bitmap getBitmapForElement(SkinElement element) {
             ElementStates states = elementStates.get(element.id);
             if (states == null) {
+                addDebugMessage("No states for: " + element.id);
                 BitmapElement xmlElement = xmlBitmaps.get(element.id);
                 if (xmlElement != null) {
+                    addDebugMessage("Found direct XML match for: " + element.id);
                     return extractBitmapRegion(xmlElement);
+                } else {
+                    addDebugMessage("No direct XML match for: " + element.id);
                 }
                 return null;
             }
             
             BitmapElement currentElement = getCurrentElementState(element.id, states);
             if (currentElement != null) {
+                addDebugMessage("Using state bitmap for: " + element.id);
                 return extractBitmapRegion(currentElement);
+            } else {
+                addDebugMessage("No state bitmap for: " + element.id);
             }
             
             return null;
@@ -780,7 +928,10 @@ public class MainActivity extends FragmentActivity {
         }
         
         private Bitmap extractBitmapRegion(BitmapElement element) {
-            if (element == null) return null;
+            if (element == null) {
+                addDebugMessage("extractBitmapRegion: element is null");
+                return null;
+            }
             
             String fileName = element.file;
             if (fileName.startsWith("skin/")) {
@@ -789,6 +940,8 @@ public class MainActivity extends FragmentActivity {
             
             Bitmap sourceBitmap = skinBitmaps.get(fileName);
             if (sourceBitmap == null) {
+                addDebugMessage("Source bitmap not found: " + fileName);
+                addDebugMessage("Available bitmaps: " + skinBitmaps.keySet().toString());
                 return null;
             }
             
@@ -800,14 +953,20 @@ public class MainActivity extends FragmentActivity {
                     int h = Math.min(element.h, sourceBitmap.getHeight() - y);
                     
                     if (w > 0 && h > 0) {
+                        addDebugMessage("Extracted region from " + fileName + ": (" + x + "," + y + "," + w + "," + h + ")");
                         return Bitmap.createBitmap(sourceBitmap, x, y, w, h);
+                    } else {
+                        addDebugMessage("Invalid region size: " + w + "x" + h);
                     }
                 } catch (Exception e) {
-                    Log.e(TAG, "Error extracting bitmap region: " + element.id, e);
+                    addDebugMessage("Error extracting region: " + e.getMessage());
                 }
+            } else {
+                addDebugMessage("No region specified, using full bitmap: " + fileName);
+                return sourceBitmap;
             }
             
-            return sourceBitmap;
+            return null;
         }
         
         private boolean isPressed(String elementId) {
@@ -820,7 +979,7 @@ public class MainActivity extends FragmentActivity {
                     return mService.getRepeatMode() != MediaPlaybackService.REPEAT_NONE;
                 }
             } catch (RemoteException e) {
-                Log.e(TAG, "Error getting repeat mode", e);
+                addDebugMessage("Error getting repeat mode: " + e.getMessage());
             }
             return false;
         }
@@ -831,7 +990,7 @@ public class MainActivity extends FragmentActivity {
                     return mService.getShuffleMode() != MediaPlaybackService.SHUFFLE_NONE;
                 }
             } catch (RemoteException e) {
-                Log.e(TAG, "Error getting shuffle mode", e);
+                addDebugMessage("Error getting shuffle mode: " + e.getMessage());
             }
             return false;
         }
@@ -854,10 +1013,14 @@ public class MainActivity extends FragmentActivity {
         public boolean onTouchEvent(MotionEvent event) {
             switch (event.getAction()) {
                 case MotionEvent.ACTION_DOWN:
+                    // Двойное касание переключает debug режим
+                    showDebugInfo = !showDebugInfo;
+                    invalidate();
+                    
                     try {
                         handleTouchDown(event.getX(), event.getY());
                     } catch (Exception e) {
-                        Log.e(TAG, "Error handling touch down", e);
+                        addDebugMessage("Error handling touch down: " + e.getMessage());
                     }
                     return true;
                     
@@ -865,7 +1028,7 @@ public class MainActivity extends FragmentActivity {
                     try {
                         handleTouchUp(event.getX(), event.getY());
                     } catch (Exception e) {
-                        Log.e(TAG, "Error handling touch up", e);
+                        addDebugMessage("Error handling touch up: " + e.getMessage());
                     }
                     return true;
             }
@@ -873,6 +1036,8 @@ public class MainActivity extends FragmentActivity {
         }
         
         private void handleTouchDown(float x, float y) {
+            if (showDebugInfo) return; // В debug режиме не обрабатываем кнопки
+            
             float[] orig = mapTouchToOriginal(x, y);
             if (orig == null) return;
             float origX = orig[0];
@@ -883,6 +1048,7 @@ public class MainActivity extends FragmentActivity {
                 Rect region = entry.getValue();
                 if (region.contains((int)origX, (int)origY)) {
                     pressedButtons.add(buttonName);
+                    addDebugMessage("Button pressed: " + buttonName);
                     invalidate();
                     return;
                 }
@@ -890,6 +1056,8 @@ public class MainActivity extends FragmentActivity {
         }
         
         private void handleTouchUp(float x, float y) {
+            if (showDebugInfo) return; // В debug режиме не обрабатываем кнопки
+            
             float[] orig = mapTouchToOriginal(x, y);
             if (orig == null) {
                 if (!pressedButtons.isEmpty()) {
@@ -920,8 +1088,10 @@ public class MainActivity extends FragmentActivity {
         }
         
         private void handleButtonClick(String buttonName) {
+            addDebugMessage("Button clicked: " + buttonName);
+            
             if (mService == null) {
-                Log.w(TAG, "Cannot handle button click - service is null");
+                addDebugMessage("Cannot handle button click - service is null");
                 return;
             }
             
@@ -957,10 +1127,8 @@ public class MainActivity extends FragmentActivity {
                         togglePlaylist();
                         break;
                 }
-                
-                Log.d(TAG, "Button clicked: " + buttonName);
             } catch (RemoteException e) {
-                Log.e(TAG, "RemoteException in handleButtonClick", e);
+                addDebugMessage("RemoteException in handleButtonClick: " + e.getMessage());
             }
         }
         
@@ -970,12 +1138,14 @@ public class MainActivity extends FragmentActivity {
                     int shuffle = mService.getShuffleMode();
                     if (shuffle == MediaPlaybackService.SHUFFLE_NONE) {
                         mService.setShuffleMode(MediaPlaybackService.SHUFFLE_NORMAL);
+                        addDebugMessage("Shuffle ON");
                     } else {
                         mService.setShuffleMode(MediaPlaybackService.SHUFFLE_NONE);
+                        addDebugMessage("Shuffle OFF");
                     }
                 }
             } catch (RemoteException e) {
-                Log.e(TAG, "Error toggling shuffle", e);
+                addDebugMessage("Error toggling shuffle: " + e.getMessage());
             }
         }
         
@@ -985,32 +1155,35 @@ public class MainActivity extends FragmentActivity {
                     int mode = mService.getRepeatMode();
                     if (mode == MediaPlaybackService.REPEAT_NONE) {
                         mService.setRepeatMode(MediaPlaybackService.REPEAT_ALL);
+                        addDebugMessage("Repeat ALL");
                     } else if (mode == MediaPlaybackService.REPEAT_ALL) {
                         mService.setRepeatMode(MediaPlaybackService.REPEAT_CURRENT);
+                        addDebugMessage("Repeat ONE");
                     } else {
                         mService.setRepeatMode(MediaPlaybackService.REPEAT_NONE);
+                        addDebugMessage("Repeat OFF");
                     }
                 }
             } catch (RemoteException e) {
-                Log.e(TAG, "Error toggling repeat", e);
+                addDebugMessage("Error toggling repeat: " + e.getMessage());
             }
         }
         
         private void toggleEqualizer() {
             equalizerEnabled = !equalizerEnabled;
-            Log.d(TAG, "Equalizer toggled: " + equalizerEnabled);
+            addDebugMessage("Equalizer toggled: " + equalizerEnabled);
         }
         
         private void togglePlaylist() {
             playlistEnabled = !playlistEnabled;
-            Log.d(TAG, "Playlist toggled: " + playlistEnabled);
+            addDebugMessage("Playlist toggled: " + playlistEnabled);
         }
         
         public void updateDisplay() {
             try {
                 post(this::invalidate);
             } catch (Exception e) {
-                Log.e(TAG, "Error updating display", e);
+                addDebugMessage("Error updating display: " + e.getMessage());
             }
         }
         
@@ -1020,7 +1193,7 @@ public class MainActivity extends FragmentActivity {
                     bmp.recycle();
                 }
             } catch (Exception e) {
-                Log.w(TAG, "Error recycling bitmap", e);
+                addDebugMessage("Error recycling bitmap: " + e.getMessage());
             }
         }
     }
