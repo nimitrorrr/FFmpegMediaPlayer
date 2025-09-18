@@ -42,6 +42,15 @@ import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+// Добавьте эти импорты в начало файла MainActivity.java
+
+import java.io.BufferedReader;
+import java.io.FileInputStream;
+import java.io.InputStreamReader;
+import java.util.Iterator;
+import org.json.JSONObject;
+
+
 public class MainActivity extends FragmentActivity {
     
     private static final String TAG = MainActivity.class.getName();
